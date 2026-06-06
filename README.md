@@ -1,8 +1,10 @@
 # 📊 Sharpe — Analisi ETF / Indici e Portafoglio
 
-Strumento locale e interattivo (Streamlit) per analizzare singoli ETF/indici e
-un portafoglio composto da essi: rendimenti, rischio, correlazioni,
-diversificazione e distribuzione per paese/settore.
+Strumento interattivo (Streamlit) per analizzare singoli ETF/indici e un
+portafoglio composto da essi: rendimenti, rischio, correlazioni,
+diversificazione, distribuzione per paese/settore, analisi tecnica, indicatori
+statistici e confronto con portafogli celebri. Funziona in locale e online
+(Streamlit Community Cloud).
 
 > ⚠️ **Disclaimer**: strumento a scopo di **analisi e didattico**. Non
 > costituisce consulenza finanziaria né raccomandazione di investimento.
@@ -13,36 +15,53 @@ diversificazione e distribuzione per paese/settore.
 
 ## Funzionalità
 
+In cima all'app, sempre visibile, c'è l'**indicatore generale di mercato
+risk-on / risk-off (1–5)**: stima statistica, indipendente dal portafoglio, se
+il contesto favorisca più gli asset rischiosi (azioni) o quelli prudenti
+(obbligazioni/liquidità), su orizzonte orientativo di ~1 anno (calcolato su un
+benchmark azionario globale).
+
 L'app è divisa in due sezioni (menu a lato):
 
-- **🧱 Builder** — costruzione e analisi del portafoglio.
-- **📈 Analisi tecnica** — per ogni asset: grafico a **candele**, **volumi**,
-  **medie mobili** e **RSI**, strumenti per **disegnare linee/trendline**,
-  statistiche principali e selettore di intervallo (YTD / 1A / 3A / 5A / 10A / max).
+### 🧱 Builder — costruzione e analisi del portafoglio
+- **Ricerca online**: cerca ETF/indici per nome o ticker (dati da Yahoo
+  Finance), selezionali e assegna i pesi. Gli asset sono mostrati con il loro
+  **nome reale**, non con il ticker.
+- **Singoli asset**: CAGR, volatilità, Sharpe, Sortino, max drawdown, rendimento
+  cumulato; andamento normalizzato a 100 e grafico dei drawdown.
+- **Portafoglio**: metriche complessive con volatilità dalla **matrice di
+  covarianza** (σₚ = √(wᵀ Σ w)), confronto portafoglio vs singoli asset,
+  **heatmap di correlazione** e **contributo di ciascun asset al rischio**.
+- **Allocazione**: distribuzione per **paese** e **settore** (recupero settori
+  da yfinance dove disponibile e/o inserimento manuale / da CSV).
+- **⏱️ Timing** (rolling returns): per ogni giorno di partenza, quanto avrebbe
+  reso il portafoglio **in % all'anno** tenendolo per una finestra fissa
+  (1 / 3 / 5 / 10 anni). Mostra quanto conta il momento d'ingresso, con
+  peggiore/mediana/migliore e % di finestre positive. Usa tutto lo storico.
+- **📊 Statistica**: indicatori del portafoglio — prezzo vs media storica
+  (caro/economico), RSI, vantaggio statistico (Sharpe + % di anni positivi).
+- **🧮 Ottimizzazione**: pesi ottimali per tre obiettivi — **minima varianza**,
+  **massimo rendimento annuo**, **massimo Sharpe** (tangenza) — con **frontiera
+  efficiente** e pulsante per applicare i pesi (richiede `scipy`). Una **quota
+  minima per asset** (slider, % della quota equipesata: L = α·1/N) evita che un
+  asset vada a 0% e resta sempre ammissibile al variare del numero di asset.
+- **🆚 Confronto**: confronta il tuo portafoglio (grafico base 100 + tabella di
+  statistiche) con singoli ETF/indici e con **portafogli famosi** (60/40, All
+  Weather, Golden Butterfly, Permanent Portfolio), ricostruiti con ETF proxy.
 
-- **Ricerca online e costruzione del portafoglio nell'app**: cerca ETF/indici
-  per nome o ticker (dati da Yahoo Finance), selezionali e assegna i pesi.
-  Gli asset sono mostrati con il loro **nome reale**, non con il ticker.
-- **Singoli asset**: rendimento annualizzato (CAGR), volatilità annualizzata,
-  Sharpe, Sortino, max drawdown, rendimento cumulato; grafico dell'andamento
-  normalizzato a 100 e grafico dei drawdown.
-- **Portafoglio**: metriche complessive con volatilità calcolata dalla
-  **matrice di covarianza** (σₚ = √(wᵀ Σ w)), confronto portafoglio vs singoli
-  asset, **heatmap di correlazione** e **contributo di ciascun asset al rischio**.
-- **Allocazione**: distribuzione percentuale per **paese** e per **settore**,
-  con recupero automatico dei settori da yfinance (dove disponibile) e/o
-  inserimento manuale / da CSV.
-- **Ottimizzazione (extra)**: pesi ottimali secondo tre obiettivi —
-  **minima varianza**, **massimo rendimento annuo** e **massimo indice di
-  Sharpe** (portafoglio di tangenza) — con **frontiera efficiente** e pulsante
-  per applicare i pesi ottimali al portafoglio (richiede `scipy`).
-  Una **quota minima per asset** (slider, % della quota equipesata: la soglia
-  è L = α·1/N) garantisce che nessun asset finisca a 0% e si scala col numero
-  di asset restando sempre ammissibile.
+### 📈 Analisi tecnica (per singolo asset)
+- Grafico a **candele** (OHLC), **volumi**, **medie mobili** SMA/EMA con periodi
+  a scelta, **RSI** con periodo regolabile, strumenti per **disegnare
+  linee/trendline**.
+- **Statistiche** dell'asset e **indicatori** (caro/economico, RSI, vantaggio
+  statistico) sull'intervallo selezionato (YTD / 1A / 3A / 5A / 10A / max).
+- I prezzi usano la **valuta nativa** dell'asset (standard per le candele).
+
+### Trasversali
 - **Salva/carica** un portafoglio in formato JSON.
-- **Conversione valutaria** opzionale: tutti i prezzi convertiti nella valuta
-  base (default EUR) usando i tassi di cambio di yfinance, *prima* di calcolare
-  i rendimenti.
+- **Conversione valutaria** opzionale: prezzi convertiti nella valuta base
+  (default EUR) coi tassi di cambio di yfinance, *prima* di calcolare i rendimenti.
+- Auto-reload locale (`.streamlit/config.toml`, `runOnSave`).
 
 ## Struttura del progetto
 
@@ -84,6 +103,8 @@ pip install -r requirements.txt
 
 ```bash
 streamlit run app.py
+# in alternativa, se "streamlit" non è nel PATH:
+python -m streamlit run app.py
 ```
 
 Si aprirà il browser su `http://localhost:8501`.
@@ -105,9 +126,15 @@ Si aprirà il browser su `http://localhost:8501`.
    **intervallo personalizzato**, il **tasso risk-free** annuo (default 3%) e
    la **valuta base** (default EUR); attiva/disattiva la **conversione
    valutaria**.
-4. Esplora le tab: l'analisi si aggiorna automaticamente. Gli asset sono
-   mostrati con il loro **nome reale** (il ticker è usato solo per scaricare i
-   dati). Usa **🔄 Aggiorna dati** nella sidebar per forzare un nuovo download.
+4. Esplora le tab del **Builder** (Singoli asset, Portafoglio, Allocazione,
+   Timing, Statistica, Ottimizzazione, Confronto): l'analisi si aggiorna
+   automaticamente. Gli asset sono mostrati con il loro **nome reale** (il
+   ticker è usato solo per scaricare i dati). Usa **🔄 Aggiorna dati** nella
+   sidebar per forzare un nuovo download.
+5. Passa alla pagina **📈 Analisi tecnica** (menu a lato) per il dettaglio di un
+   singolo asset (candele, volumi, medie mobili, RSI, disegno trendline).
+6. In cima a ogni pagina trovi l'**indicatore di mercato risk-on/off**:
+   apri il pannello per vedere il gauge 1–5 e i tre segnali che lo compongono.
 
 ### Composizione paese/settore
 
@@ -147,9 +174,44 @@ SWDA.MI,settore,Tecnologia,0.24
 - Il **contributo al rischio** di un asset = contributo marginale × peso, in %
   sul totale: evidenzia chi diversifica e chi pesa davvero sul rischio.
 
+## Indicatori statistici (metodologia)
+
+> ⚠️ Sono indicatori **statistici/storici a scopo didattico**, non consigli di
+> investimento. I rendimenti passati non predicono quelli futuri.
+
+- **Semaforo di mercato (risk-on/off, 1–5)**: media di tre segnali normalizzati
+  in [−1, +1] su un benchmark azionario globale — **trend** (prezzo vs media
+  200gg), **regime di volatilità** (volatilità recente vs sua mediana storica),
+  **momentum** (~6 mesi). Il composito è mappato su 1–5 (1–2 rosso = meglio asset
+  prudenti, 3 grigio = neutro, 4–5 verde = meglio asset rischiosi).
+- **Prezzo caro/economico**: confronto del livello attuale con la propria media
+  mobile (z-score). z > +2 ≈ "molto caro", z < −2 ≈ "molto economico". È una
+  lettura *statistica*, non una valutazione fondamentale del valore reale.
+- **RSI (14)**: > 70 ipercomprato, < 30 ipervenduto.
+- **Vantaggio statistico**: sintesi di Sharpe storico e quota di finestre di
+  1 anno chiuse in positivo (giudizio favorevole / neutro / sfavorevole).
+- **Timing (rolling returns)**: per ogni data di partenza, CAGR su una finestra
+  fissa (1/3/5/10 anni) a partire dall'indice di ricchezza del portafoglio.
+- **Confronto portafogli famosi**: ricostruiti con ETF proxy USA (es. All
+  Weather ≈ 30% azioni, 55% obbligazioni, 7,5% oro, 7,5% materie prime); le serie
+  sono allineate sul periodo comune e (se attiva) convertite nella valuta base.
+
+## Online (Streamlit Community Cloud)
+
+L'app può essere pubblicata gratuitamente su Streamlit Community Cloud a partire
+da un repository GitHub: il file principale è `app.py`. Ad ogni `commit` sul
+repo l'app online si ricostruisce automaticamente. Consigliata la versione di
+**Python 3.13** nelle impostazioni dell'app.
+
 ## Limiti noti
 
-- La disponibilità e la qualità dei dati dipendono da Yahoo Finance.
+- La disponibilità e la qualità dei dati dipendono da Yahoo Finance (possibili
+  ritardi, lacune o limiti di frequenza delle richieste).
 - I dati di settore via yfinance sono spesso assenti per gli ETF europei.
 - La conversione valutaria usa il cambio di chiusura giornaliero (approssimazione).
-- Nessuna garanzia sull'accuratezza: **uso didattico**.
+- Il grafico **Timing** richiede storico più lungo della finestra scelta: con
+  ETF giovani le finestre lunghe (5/10 anni) possono avere pochi o zero punti.
+- I **portafogli famosi** usano ETF proxy in USD: utili per confronto relativo,
+  non repliche esatte.
+- Gli **indicatori statistici** sono euristici e a scopo didattico.
+- Nessuna garanzia sull'accuratezza: **uso didattico**, non consulenza finanziaria.

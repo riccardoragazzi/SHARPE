@@ -47,6 +47,15 @@ SETTORI_IT = {
 DEFAULT_TICKERS = ["SWDA.MI", "EIMI.MI", "AGGH.MI"]
 DEFAULT_PESI = [50.0, 20.0, 30.0]
 
+# Portafogli "famosi" ricostruiti con ETF rappresentativi (USA, storia lunga).
+# I pesi sommano a 1. Usati per il confronto nella pagina Builder.
+PORTAFOGLI_FAMOSI = {
+    "60/40 (azioni/obbligazioni)": {"VTI": 0.60, "AGG": 0.40},
+    "All Weather (Ray Dalio)": {"VTI": 0.30, "TLT": 0.40, "IEI": 0.15, "GLD": 0.075, "DBC": 0.075},
+    "Golden Butterfly": {"VTI": 0.20, "IWN": 0.20, "TLT": 0.20, "SHY": 0.20, "GLD": 0.20},
+    "Permanent Portfolio": {"VTI": 0.25, "TLT": 0.25, "SHY": 0.25, "GLD": 0.25},
+}
+
 
 # ---------------------------------------------------------------------------
 # Funzioni con cache (evitano chiamate di rete ripetute ad ogni interazione)
@@ -90,6 +99,25 @@ def nomi_di(tickers):
 def ohlcv(ticker, period="max"):
     """Dati OHLCV di un singolo asset per l'analisi tecnica (con cache)."""
     return dati.scarica_ohlcv(ticker, period=period)
+
+
+def rendimenti_portafoglio_famoso(nome, period, start, end, valuta_base, converti):
+    """Serie dei rendimenti giornalieri di un portafoglio famoso (proxy ETF).
+
+    Restituisce ``(serie_rendimenti, mancanti)`` dove ``mancanti`` è la lista
+    dei ticker proxy non scaricabili (i pesi vengono riallocati sui presenti).
+    """
+    pesi_def = PORTAFOGLI_FAMOSI.get(nome, {})
+    if not pesi_def:
+        return pd.Series(dtype="float64"), []
+    ris = carica_dati(tuple(pesi_def.keys()), period, start, end, valuta_base, converti)
+    if ris.prezzi.empty:
+        return pd.Series(dtype="float64"), list(pesi_def.keys())
+    rend = mtr.rendimenti_giornalieri(ris.prezzi)
+    presenti = list(rend.columns)
+    mancanti = [t for t in pesi_def if t not in presenti]
+    pesi = mtr.normalizza_pesi({t: pesi_def[t] for t in presenti}, presenti)
+    return mtr.serie_rendimenti_portafoglio(rend, pesi), mancanti
 
 
 # ---------------------------------------------------------------------------

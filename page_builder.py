@@ -127,8 +127,9 @@ if ris.valute:
 # Tab di analisi del portafoglio
 # ---------------------------------------------------------------------------
 
-tab_asset, tab_pf, tab_alloc, tab_timing, tab_stat, tab_opt = st.tabs(
-    ["📈 Singoli asset", "💼 Portafoglio", "🌍 Allocazione", "⏱️ Timing", "📊 Statistica", "🧮 Ottimizzazione"]
+tab_asset, tab_pf, tab_alloc, tab_timing, tab_stat, tab_opt, tab_conf = st.tabs(
+    ["📈 Singoli asset", "💼 Portafoglio", "🌍 Allocazione", "⏱️ Timing", "📊 Statistica",
+     "🧮 Ottimizzazione", "🆚 Confronto"]
 )
 
 # === Singoli asset =========================================================
@@ -476,3 +477,72 @@ with tab_opt:
                 st.caption("Impossibile calcolare la frontiera per questo insieme di asset.")
         else:
             st.caption("Installa scipy per visualizzare la frontiera efficiente.")
+
+# === Confronto con indici e portafogli famosi =============================
+with tab_conf:
+    st.subheader("Confronto con indici e portafogli famosi")
+    st.caption(
+        "Confronta l'andamento del **tuo** portafoglio con singoli ETF/indici e con allocazioni "
+        "celebri. Le serie sono allineate sul periodo comune e "
+        + ("convertite in " + ss.valuta_base + "." if ss.converti else "lasciate nella valuta nativa.")
+    )
+
+    famosi_sel = st.multiselect(
+        "Portafogli famosi da confrontare",
+        list(cm.PORTAFOGLI_FAMOSI.keys()),
+        default=["60/40 (azioni/obbligazioni)", "All Weather (Ray Dalio)"],
+    )
+    txt_bench = st.text_input(
+        "Altri ticker/indici da confrontare (separati da virgola)",
+        value="",
+        placeholder="es. CSPX.MI, ^GSPC, SWDA.MI",
+    )
+    bench_tickers = [t.strip().upper() for t in txt_bench.replace(";", ",").split(",") if t.strip()]
+
+    serie_dict = {"Il mio portafoglio": mtr.serie_rendimenti_portafoglio(rendimenti, pesi)}
+    note = []
+    with st.spinner("Scarico i dati per il confronto..."):
+        for nome in famosi_sel:
+            s, mancanti = cm.rendimenti_portafoglio_famoso(
+                nome, ss.period, ss.data_inizio, ss.data_fine, ss.valuta_base, ss.converti
+            )
+            if not s.empty:
+                serie_dict[nome] = s
+                if mancanti:
+                    note.append(f"{nome}: proxy mancanti ({', '.join(mancanti)}), riallocato sui presenti.")
+            else:
+                note.append(f"{nome}: dati non disponibili.")
+        for t in bench_tickers:
+            ris_b = cm.carica_dati((t,), ss.period, ss.data_inizio, ss.data_fine, ss.valuta_base, ss.converti)
+            if not ris_b.prezzi.empty:
+                nome_b = cm.nomi_di((t,)).get(t, t)
+                serie_dict[nome_b] = mtr.rendimenti_giornalieri(ris_b.prezzi).iloc[:, 0]
+            else:
+                note.append(f"{t}: dati non disponibili.")
+
+    for n in note:
+        st.warning(n)
+
+    df_rend = pd.DataFrame(serie_dict).dropna()
+    if df_rend.shape[1] < 2 or df_rend.empty:
+        st.info("Aggiungi almeno un portafoglio famoso o un ticker per fare il confronto.")
+    else:
+        st.caption(
+            f"Periodo comune: {df_rend.index.min():%d/%m/%Y} → {df_rend.index.max():%d/%m/%Y} "
+            f"({len(df_rend)} sedute). Tutte le curve partono da 100 alla prima data comune."
+        )
+        cum = mtr.serie_cumulata(df_rend, base=100.0)
+        fig_conf = px.line(cum, labels={"value": "Indice (base 100)", "index": "Data", "variable": "Serie"})
+        fig_conf.update_traces(line=dict(width=1.4))
+        fig_conf.update_traces(selector=dict(name="Il mio portafoglio"), line=dict(width=3.6, color="black"))
+        fig_conf.update_layout(hovermode="x unified", legend_title_text="Serie")
+        st.plotly_chart(fig_conf, width="stretch")
+
+        st.markdown("**Statistiche a confronto** (sul periodo comune)")
+        met_conf = mtr.metriche_asset(df_rend, risk_free)
+        st.dataframe(cm.formatta_metriche(met_conf), width="stretch")
+        st.caption(
+            "I portafogli famosi sono ricostruiti con ETF rappresentativi (USA): possono differire "
+            "leggermente dalle versioni «originali». ⚠️ Analisi storica a scopo didattico, "
+            "non un consiglio di investimento."
+        )
