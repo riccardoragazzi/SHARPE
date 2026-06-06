@@ -11,10 +11,13 @@ from __future__ import annotations
 
 import json
 
+import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 import data as dati
+import metrics as mtr
 
 ss = st.session_state
 
@@ -280,3 +283,93 @@ def portafoglio_pulito() -> pd.DataFrame:
     sel["Ticker"] = sel["Ticker"].astype(str).str.strip().str.upper()
     sel = sel[sel["Ticker"] != ""].drop_duplicates(subset="Ticker").reset_index(drop=True)
     return sel
+
+
+# ---------------------------------------------------------------------------
+# Componente UI: "lettura statistica" (semaforo + indicatori)
+# ---------------------------------------------------------------------------
+
+def _segno(x: float) -> str:
+    """Traduce un sotto-segnale [-1,+1] in una parola con icona."""
+    if x is None or (isinstance(x, float) and np.isnan(x)):
+        return "—"
+    if x > 0.15:
+        return "favorevole ✅"
+    if x < -0.15:
+        return "sfavorevole ⚠️"
+    return "neutro ➖"
+
+
+def mostra_lettura_statistica(prezzo: pd.Series, rendimenti: pd.Series, risk_free: float, chiave: str = ""):
+    """Disegna il semaforo del rischio (gauge 1–5) e gli indicatori statistici.
+
+    - ``prezzo``: serie di livelli (prezzo dell'asset o ricchezza del portafoglio),
+      su cui si calcolano semaforo, valutazione caro/economico e RSI;
+    - ``rendimenti``: serie dei rendimenti, su cui si calcola il vantaggio statistico.
+    """
+    sem = mtr.semaforo_rischio(prezzo)
+    val = mtr.valutazione_prezzo(prezzo)
+    rsi_serie = mtr.rsi(prezzo, 14).dropna()
+    rsi_val = float(rsi_serie.iloc[-1]) if not rsi_serie.empty else float("nan")
+    van = mtr.vantaggio_statistico(rendimenti, risk_free)
+
+    st.markdown("#### 🚦 Semaforo del rischio (1–5)")
+    cg, ci = st.columns([1, 1])
+    with cg:
+        fig = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=round(sem["valore"], 2),
+            number={"suffix": " / 5", "font": {"size": 34}},
+            gauge={
+                "axis": {"range": [1, 5], "tickvals": [1, 2, 3, 4, 5]},
+                "bar": {"color": "rgba(0,0,0,0)"},
+                "steps": [
+                    {"range": [1, 1.8], "color": "#b3261e"},
+                    {"range": [1.8, 2.6], "color": "#e8705f"},
+                    {"range": [2.6, 3.4], "color": "#bdbdbd"},
+                    {"range": [3.4, 4.2], "color": "#7fc97f"},
+                    {"range": [4.2, 5], "color": "#2e7d32"},
+                ],
+                "threshold": {"line": {"color": "black", "width": 5}, "thickness": 0.9, "value": sem["valore"]},
+            },
+        ))
+        fig.update_layout(height=240, margin=dict(t=10, b=10, l=20, r=20))
+        st.plotly_chart(fig, width="stretch", key=f"gauge_{chiave}")
+    with ci:
+        st.markdown(
+            f"<div style='background:{sem['colore']};padding:16px 18px;border-radius:12px;"
+            f"color:white;text-align:center'>"
+            f"<div style='font-size:42px;font-weight:800;line-height:1'>{sem['banda']}/5</div>"
+            f"<div style='font-size:15px;margin-top:6px'>{sem['etichetta']}</div></div>",
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            f"Componenti — Trend: {_segno(sem['trend'])} · "
+            f"Volatilità: {_segno(sem['volatilita'])} · "
+            f"Momentum: {_segno(sem['momentum'])}"
+        )
+
+    st.markdown("#### 🔎 Indicatori")
+    a, b, c = st.columns(3)
+    premio = val.get("premio", np.nan)
+    a.metric(
+        "Prezzo vs media storica", val["giudizio_breve"],
+        f"{premio:+.1%}" if premio is not None and not np.isnan(premio) else None,
+        delta_color="off",
+    )
+    b.metric("RSI (14)", f"{rsi_val:.0f}" if not np.isnan(rsi_val) else "—",
+             mtr.giudizio_rsi(rsi_val), delta_color="off")
+    sh = van.get("sharpe", np.nan)
+    c.metric("Vantaggio statistico", van["giudizio"],
+             f"Sharpe {sh:.2f}" if sh is not None and not np.isnan(sh) else None, delta_color="off")
+
+    z = val.get("z", np.nan)
+    win = van.get("win_rate", np.nan)
+    win_txt = f"{win:.0%}" if win is not None and not np.isnan(win) else "n/d"
+    z_txt = f"{z:.2f}" if z is not None and not np.isnan(z) else "n/d"
+    st.caption(
+        f"«Prezzo vs media»: quanto il livello attuale è sopra/sotto la propria media storica "
+        f"(z-score {z_txt}). «Vantaggio statistico»: dallo Sharpe storico; finestre di 1 anno "
+        f"chiuse in positivo: {win_txt}. "
+        "⚠️ Indicatori statistici/storici a scopo **didattico**, non consigli di investimento."
+    )

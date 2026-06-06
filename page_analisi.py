@@ -205,3 +205,11 @@ st.caption(
     "destra del grafico, poi traccia sul grafico. La gomma cancella. ⚠️ I disegni **non** restano salvati "
     "al ricaricamento della pagina."
 )
+
+st.divider()
+st.subheader("📊 Lettura statistica")
+st.caption(
+    "Semaforo e «caro/economico» sono calcolati su **tutto lo storico** (servono per capire la "
+    "situazione attuale nel contesto storico); il «vantaggio statistico» sull'**intervallo selezionato**."
+)
+cm.mostra_lettura_statistica(close_full, rend, risk_free, chiave=f"asset_{ticker}")

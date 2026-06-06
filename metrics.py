@@ -587,3 +587,149 @@ def rsi(prezzi: pd.Series, periodo: int = 14) -> pd.Series:
     media_p = perdita.ewm(alpha=1.0 / periodo, adjust=False, min_periods=periodo).mean()
     rs = media_g / media_p.replace(0.0, np.nan)
     return 100.0 - 100.0 / (1.0 + rs)
+
+
+# ---------------------------------------------------------------------------
+# Indicatori statistici: valutazione, RSI, vantaggio, semaforo del rischio
+# ---------------------------------------------------------------------------
+# NB: sono indicatori statistici/storici a scopo didattico, NON consigli di
+# acquisto/vendita. I rendimenti passati non predicono quelli futuri.
+
+def valutazione_prezzo(prezzo: pd.Series, finestra: int = 200) -> dict:
+    """Dice se il livello attuale è "caro" o "economico" rispetto alla SUA media.
+
+    Confronto statistico-tecnico (non fondamentale): prezzo corrente vs media
+    mobile su ``finestra`` giorni. Restituisce premio/sconto % e z-score
+    (di quante deviazioni standard il prezzo è sopra/sotto la media).
+    """
+    p = prezzo.dropna()
+    vuoto = {"prezzo": np.nan, "riferimento": np.nan, "premio": np.nan,
+             "z": np.nan, "giudizio": "Dati insufficienti", "giudizio_breve": "—"}
+    if len(p) < 20:
+        return vuoto
+    w = min(int(finestra), len(p))
+    media = float(p.rolling(w).mean().iloc[-1])
+    sd = float(p.rolling(w).std().iloc[-1])
+    prezzo_corr = float(p.iloc[-1])
+    premio = prezzo_corr / media - 1.0 if media else np.nan
+    z = (prezzo_corr - media) / sd if sd and sd > 0 else np.nan
+
+    if np.isnan(z):
+        g, gb = "Indeterminato", "—"
+    elif z > 2:
+        g, gb = "Molto sopra la media storica (caro)", "Molto caro"
+    elif z > 1:
+        g, gb = "Sopra la media storica (caro)", "Caro"
+    elif z < -2:
+        g, gb = "Molto sotto la media storica (economico)", "Molto economico"
+    elif z < -1:
+        g, gb = "Sotto la media storica (economico)", "Economico"
+    else:
+        g, gb = "In linea con la media storica", "In linea"
+
+    return {"prezzo": prezzo_corr, "riferimento": media, "premio": premio,
+            "z": z, "giudizio": g, "giudizio_breve": gb}
+
+
+def giudizio_rsi(valore: float) -> str:
+    """Etichetta dell'RSI: ipercomprato / ipervenduto / neutro."""
+    if valore is None or np.isnan(valore):
+        return "—"
+    if valore >= 70:
+        return "Ipercomprato"
+    if valore <= 30:
+        return "Ipervenduto"
+    return "Neutro"
+
+
+def vantaggio_statistico(rendimenti: pd.Series, risk_free: float = 0.0) -> dict:
+    """Sintetizza il "vantaggio statistico" storico di una serie di rendimenti.
+
+    Combina rendimento annualizzato (CAGR), indice di Sharpe e win-rate
+    (quota di finestre di 1 anno chiuse in positivo). Restituisce un giudizio
+    favorevole / neutro / sfavorevole basato sullo Sharpe storico.
+    """
+    r = rendimenti.dropna()
+    if len(r) < 2:
+        return {"cagr": np.nan, "sharpe": np.nan, "win_rate": np.nan, "giudizio": "—"}
+    cagr_v = cagr(r)
+    sharpe_v = sharpe(r, risk_free)
+    roll1 = rolling_rendimenti_annualizzati(r, 1)
+    win = float((roll1 > 0).mean()) if not roll1.empty else np.nan
+
+    if np.isnan(sharpe_v):
+        g = "—"
+    elif sharpe_v >= 0.75:
+        g = "Favorevole"
+    elif sharpe_v <= 0:
+        g = "Sfavorevole"
+    else:
+        g = "Neutro"
+    return {"cagr": cagr_v, "sharpe": sharpe_v, "win_rate": win, "giudizio": g}
+
+
+# Colori ed etichette delle 5 fasce del semaforo del rischio.
+SEMAFORO_COLORI = {1: "#b3261e", 2: "#e8705f", 3: "#bdbdbd", 4: "#7fc97f", 5: "#2e7d32"}
+SEMAFORO_ETICHETTE = {
+    1: "Molto sfavorevole al rischio",
+    2: "Sfavorevole al rischio",
+    3: "Neutro",
+    4: "Favorevole al rischio",
+    5: "Molto favorevole al rischio",
+}
+
+
+def semaforo_rischio(prezzo: pd.Series) -> dict:
+    """Semaforo statistico 1–5: quanto è "favorevole" il momento per il rischio.
+
+    Punteggio composito (media di 3 segnali, ciascuno normalizzato in [-1, +1]):
+    - **trend**: prezzo sopra/sotto la media mobile a 200 giorni;
+    - **volatilità**: volatilità recente (21g) sotto/sopra la sua mediana storica
+      (bassa = favorevole, alta = sfavorevole);
+    - **momentum**: rendimento degli ultimi ~6 mesi (126 giorni).
+
+    Mappa il composito su 1–5: 1–2 = sfavorevole (rosso), 3 = neutro (grigio),
+    4–5 = favorevole (verde). ``valore`` è la versione continua (1.0–5.0) per il
+    gauge; ``banda`` è l'intero 1–5.
+    """
+    p = prezzo.dropna()
+    if len(p) < 30:
+        return {"banda": 3, "valore": 3.0, "colore": SEMAFORO_COLORI[3],
+                "etichetta": "Dati insufficienti", "trend": np.nan,
+                "volatilita": np.nan, "momentum": np.nan}
+
+    ret = p.pct_change()
+    prezzo_corr = float(p.iloc[-1])
+
+    # 1) Trend vs media 200 giorni: +10% sopra -> +1, -10% sotto -> -1.
+    sma = float(p.rolling(min(200, len(p))).mean().iloc[-1])
+    s_trend = float(np.clip((prezzo_corr / sma - 1.0) / 0.10, -1, 1)) if sma > 0 else 0.0
+
+    # 2) Regime di volatilità: vol recente vs mediana storica (più bassa = meglio).
+    vol = ret.rolling(min(21, len(ret))).std() * np.sqrt(GIORNI_BORSA)
+    vol_corr = float(vol.iloc[-1])
+    vol_med = float(vol.median())
+    s_vol = float(np.clip(1.0 - vol_corr / vol_med, -1, 1)) if vol_med > 0 else 0.0
+
+    # 3) Momentum a ~6 mesi: +15% -> +1, -15% -> -1.
+    k = min(126, len(p) - 1)
+    mom = prezzo_corr / float(p.iloc[-1 - k]) - 1.0 if k > 0 else 0.0
+    s_mom = float(np.clip(mom / 0.15, -1, 1))
+
+    comp = float(np.nanmean([s_trend, s_vol, s_mom]))
+    valore = float(np.clip(3.0 + comp * 2.0, 1.0, 5.0))  # versione continua 1–5
+
+    if comp <= -0.6:
+        banda = 1
+    elif comp <= -0.2:
+        banda = 2
+    elif comp < 0.2:
+        banda = 3
+    elif comp < 0.6:
+        banda = 4
+    else:
+        banda = 5
+
+    return {"banda": banda, "valore": valore, "colore": SEMAFORO_COLORI[banda],
+            "etichetta": SEMAFORO_ETICHETTE[banda], "trend": s_trend,
+            "volatilita": s_vol, "momentum": s_mom}

@@ -127,8 +127,8 @@ if ris.valute:
 # Tab di analisi del portafoglio
 # ---------------------------------------------------------------------------
 
-tab_asset, tab_pf, tab_alloc, tab_timing, tab_opt = st.tabs(
-    ["📈 Singoli asset", "💼 Portafoglio", "🌍 Allocazione", "⏱️ Timing", "🧮 Ottimizzazione"]
+tab_asset, tab_pf, tab_alloc, tab_timing, tab_stat, tab_opt = st.tabs(
+    ["📈 Singoli asset", "💼 Portafoglio", "🌍 Allocazione", "⏱️ Timing", "📊 Statistica", "🧮 Ottimizzazione"]
 )
 
 # === Singoli asset =========================================================
@@ -344,6 +344,23 @@ with tab_timing:
                 f"{len(roll)} possibili giorni di partenza analizzati su ~{anni_storico:.1f} anni di storico. "
                 "⚠️ I rendimenti passati non garantiscono quelli futuri."
             )
+
+# === Lettura statistica del portafoglio ===================================
+with tab_stat:
+    st.subheader("Lettura statistica del portafoglio")
+    st.caption(
+        "Semaforo del rischio e indicatori calcolati **sul portafoglio nel suo insieme**, "
+        "usando tutto lo storico comune disponibile."
+    )
+    with st.spinner("Calcolo gli indicatori sul portafoglio..."):
+        ris_stat = cm.carica_dati(tuple(tickers_ok), "max", None, None, ss.valuta_base, ss.converti)
+    if ris_stat.prezzi.empty:
+        st.warning("Storico non disponibile per il calcolo.")
+    else:
+        rend_stat = mtr.rendimenti_giornalieri(ris_stat.prezzi)
+        serie_pf_stat = mtr.serie_rendimenti_portafoglio(rend_stat, pesi)
+        ricchezza_pf = mtr.serie_cumulata(serie_pf_stat, base=100.0)
+        cm.mostra_lettura_statistica(ricchezza_pf, serie_pf_stat, risk_free, chiave="portafoglio")
 
 # === Ottimizzazione ========================================================
 with tab_opt:
