@@ -1,0 +1,7 @@
+# Dipendenze del progetto Sharpe (Python 3.11+)
+yfinance>=0.2.40
+pandas>=2.1
+numpy>=1.26
+plotly>=5.18
+streamlit>=1.30
+scipy>=1.11

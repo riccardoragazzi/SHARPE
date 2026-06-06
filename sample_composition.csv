@@ -1,0 +1,52 @@
+ticker,tipo,categoria,peso
+SWDA.MI,paese,Stati Uniti,0.71
+SWDA.MI,paese,Giappone,0.06
+SWDA.MI,paese,Regno Unito,0.04
+SWDA.MI,paese,Francia,0.03
+SWDA.MI,paese,Canada,0.03
+SWDA.MI,paese,Svizzera,0.03
+SWDA.MI,paese,Germania,0.02
+SWDA.MI,paese,Altri,0.08
+SWDA.MI,settore,Tecnologia,0.24
+SWDA.MI,settore,Servizi finanziari,0.15
+SWDA.MI,settore,Sanità,0.12
+SWDA.MI,settore,Consumi ciclici,0.11
+SWDA.MI,settore,Industriali,0.11
+SWDA.MI,settore,Servizi di comunicazione,0.08
+SWDA.MI,settore,Consumi difensivi,0.06
+SWDA.MI,settore,Energia,0.04
+SWDA.MI,settore,Materiali di base,0.04
+SWDA.MI,settore,Utility,0.03
+SWDA.MI,settore,Immobiliare,0.02
+EIMI.MI,paese,Cina,0.27
+EIMI.MI,paese,India,0.18
+EIMI.MI,paese,Taiwan,0.18
+EIMI.MI,paese,Corea del Sud,0.12
+EIMI.MI,paese,Brasile,0.05
+EIMI.MI,paese,Arabia Saudita,0.04
+EIMI.MI,paese,Sudafrica,0.03
+EIMI.MI,paese,Altri,0.13
+EIMI.MI,settore,Tecnologia,0.23
+EIMI.MI,settore,Servizi finanziari,0.22
+EIMI.MI,settore,Consumi ciclici,0.13
+EIMI.MI,settore,Servizi di comunicazione,0.09
+EIMI.MI,settore,Materiali di base,0.08
+EIMI.MI,settore,Industriali,0.06
+EIMI.MI,settore,Consumi difensivi,0.05
+EIMI.MI,settore,Energia,0.05
+EIMI.MI,settore,Sanità,0.04
+EIMI.MI,settore,Utility,0.03
+EIMI.MI,settore,Immobiliare,0.02
+AGGH.MI,paese,Stati Uniti,0.40
+AGGH.MI,paese,Giappone,0.11
+AGGH.MI,paese,Cina,0.08
+AGGH.MI,paese,Francia,0.06
+AGGH.MI,paese,Germania,0.05
+AGGH.MI,paese,Regno Unito,0.05
+AGGH.MI,paese,Italia,0.04
+AGGH.MI,paese,Canada,0.03
+AGGH.MI,paese,Altri,0.18
+AGGH.MI,settore,Titoli di Stato,0.55
+AGGH.MI,settore,Corporate,0.20
+AGGH.MI,settore,Agenzie e sovranazionali,0.15
+AGGH.MI,settore,Cartolarizzati,0.10
