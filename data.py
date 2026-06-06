@@ -450,3 +450,29 @@ def nome_strumento(ticker: str) -> str:
 def nomi_strumenti(tickers: list[str]) -> dict[str, str]:
     """Comodità: mappa ticker -> nome per una lista di ticker."""
     return {normalizza_ticker(t): nome_strumento(t) for t in tickers}
+
+
+# ---------------------------------------------------------------------------
+# Dati OHLCV per l'analisi tecnica (candele, volumi, medie mobili)
+# ---------------------------------------------------------------------------
+
+def scarica_ohlcv(ticker: str, period: str = "max") -> pd.DataFrame:
+    """Scarica i dati OHLCV (Open/High/Low/Close/Volume) di un singolo asset.
+
+    Pensato per l'analisi tecnica: prezzi aggiustati (``auto_adjust=True``) e
+    valuta **nativa** dell'asset (nessuna conversione). Si scarica di default
+    tutto lo storico (``period="max"``) e poi si ritaglia l'intervallo a video.
+    Indice senza fuso orario. In caso di errore ritorna un DataFrame vuoto.
+    """
+    try:
+        tk = yf.Ticker(normalizza_ticker(ticker))
+        hist = tk.history(period=period, auto_adjust=True)
+        if hist is None or hist.empty:
+            return pd.DataFrame()
+        if isinstance(hist.index, pd.DatetimeIndex) and hist.index.tz is not None:
+            hist.index = hist.index.tz_localize(None)
+        hist.index = hist.index.normalize()
+        colonne = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in hist.columns]
+        return hist[colonne]
+    except Exception:
+        return pd.DataFrame()

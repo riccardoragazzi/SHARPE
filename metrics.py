@@ -511,3 +511,27 @@ def pesi_ottimizzati(
             rendimenti, risk_free=risk_free, long_only=long_only, frazione_minima=frazione_minima
         )
     raise ValueError(f"Obiettivo non riconosciuto: {obiettivo}")
+
+
+# ---------------------------------------------------------------------------
+# Indicatori di analisi tecnica
+# ---------------------------------------------------------------------------
+
+def media_mobile(prezzi: pd.Series, finestra: int) -> pd.Series:
+    """Media mobile semplice (SMA) sui prezzi, su ``finestra`` giorni."""
+    return prezzi.rolling(int(finestra), min_periods=1).mean()
+
+
+def rsi(prezzi: pd.Series, periodo: int = 14) -> pd.Series:
+    """Relative Strength Index (RSI) con smoothing di Wilder.
+
+    Valori 0–100: convenzionalmente >70 = ipercomprato, <30 = ipervenduto.
+    """
+    delta = prezzi.diff()
+    guadagno = delta.clip(lower=0.0)
+    perdita = -delta.clip(upper=0.0)
+    # Media esponenziale alla Wilder (alpha = 1/periodo).
+    media_g = guadagno.ewm(alpha=1.0 / periodo, adjust=False, min_periods=periodo).mean()
+    media_p = perdita.ewm(alpha=1.0 / periodo, adjust=False, min_periods=periodo).mean()
+    rs = media_g / media_p.replace(0.0, np.nan)
+    return 100.0 - 100.0 / (1.0 + rs)

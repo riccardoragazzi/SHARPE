@@ -13,6 +13,13 @@ diversificazione e distribuzione per paese/settore.
 
 ## Funzionalità
 
+L'app è divisa in due sezioni (menu a lato):
+
+- **🧱 Builder** — costruzione e analisi del portafoglio.
+- **📈 Analisi tecnica** — per ogni asset: grafico a **candele**, **volumi**,
+  **medie mobili** e **RSI**, strumenti per **disegnare linee/trendline**,
+  statistiche principali e selettore di intervallo (YTD / 1A / 3A / 5A / 10A / max).
+
 - **Ricerca online e costruzione del portafoglio nell'app**: cerca ETF/indici
   per nome o ticker (dati da Yahoo Finance), selezionali e assegna i pesi.
   Gli asset sono mostrati con il loro **nome reale**, non con il ticker.
@@ -41,9 +48,12 @@ diversificazione e distribuzione per paese/settore.
 
 ```
 Sharpe/
-├── data.py                 # download e pulizia dati (prezzi, cambi, settori, CSV)
-├── metrics.py              # tutti i calcoli (rendimenti, rischio, correlazioni…)
-├── app.py                  # interfaccia Streamlit (in italiano)
+├── data.py                 # download e pulizia dati (prezzi, cambi, settori, OHLCV, ricerca)
+├── metrics.py              # calcoli (rendimenti, rischio, correlazioni, ottimizzazione, indicatori tecnici)
+├── common.py               # stato/funzioni condivise + barra laterale (parametri)
+├── app.py                  # punto d'ingresso: configura e gestisce la navigazione tra le pagine
+├── page_builder.py         # pagina "Builder": costruzione e analisi del portafoglio
+├── page_analisi.py         # pagina "Analisi tecnica": candele, volumi, medie mobili, RSI
 ├── requirements.txt        # dipendenze
 ├── sample_composition.csv  # esempio di composizione paese/settore (valori illustrativi)
 └── README.md
