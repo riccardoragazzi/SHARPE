@@ -207,9 +207,9 @@ st.caption(
 )
 
 st.divider()
-st.subheader("📊 Lettura statistica")
+st.subheader("📊 Lettura statistica dell'asset")
 st.caption(
-    "Semaforo e «caro/economico» sono calcolati su **tutto lo storico** (servono per capire la "
-    "situazione attuale nel contesto storico); il «vantaggio statistico» sull'**intervallo selezionato**."
+    "«Prezzo vs media» e RSI sono calcolati su **tutto lo storico**; il «vantaggio statistico» "
+    "sull'**intervallo selezionato**. (Il semaforo risk-on/off generale è in cima all'app.)"
 )
 cm.mostra_lettura_statistica(close_full, rend, risk_free, chiave=f"asset_{ticker}")

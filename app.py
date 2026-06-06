@@ -31,6 +31,9 @@ st.caption(
     "Finance e possono contenere errori o ritardi."
 )
 
+# Indicatore GENERALE di mercato (risk-on / risk-off), indipendente dal portafoglio.
+cm.mostra_semaforo_mercato()
+
 cm.sidebar_parametri()
 
 # Navigazione tra le due sezioni.

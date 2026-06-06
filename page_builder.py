@@ -349,8 +349,8 @@ with tab_timing:
 with tab_stat:
     st.subheader("Lettura statistica del portafoglio")
     st.caption(
-        "Semaforo del rischio e indicatori calcolati **sul portafoglio nel suo insieme**, "
-        "usando tutto lo storico comune disponibile."
+        "Indicatori calcolati **sul portafoglio nel suo insieme**, usando tutto lo storico comune "
+        "disponibile. (Il semaforo risk-on/off generale di mercato è in cima all'app.)"
     )
     with st.spinner("Calcolo gli indicatori sul portafoglio..."):
         ris_stat = cm.carica_dati(tuple(tickers_ok), "max", None, None, ss.valuta_base, ss.converti)

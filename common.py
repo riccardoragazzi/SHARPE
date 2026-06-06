@@ -300,56 +300,107 @@ def _segno(x: float) -> str:
     return "neutro ➖"
 
 
+# Benchmark azionario globale per l'indicatore generale di mercato (in ordine
+# di preferenza: si usa il primo che restituisce dati).
+BENCHMARK_MERCATO = ["ACWI", "URTH", "^GSPC", "SWDA.MI"]
+
+
+def _figura_gauge(valore: float, chiave: str):
+    """Crea il gauge 1–5 colorato (rosso→grigio→verde) per il semaforo."""
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=round(valore, 2),
+        number={"suffix": " / 5", "font": {"size": 34}},
+        gauge={
+            "axis": {"range": [1, 5], "tickvals": [1, 2, 3, 4, 5]},
+            "bar": {"color": "rgba(0,0,0,0)"},
+            "steps": [
+                {"range": [1, 1.8], "color": "#b3261e"},
+                {"range": [1.8, 2.6], "color": "#e8705f"},
+                {"range": [2.6, 3.4], "color": "#bdbdbd"},
+                {"range": [3.4, 4.2], "color": "#7fc97f"},
+                {"range": [4.2, 5], "color": "#2e7d32"},
+            ],
+            "threshold": {"line": {"color": "black", "width": 5}, "thickness": 0.9, "value": valore},
+        },
+    ))
+    fig.update_layout(height=240, margin=dict(t=10, b=10, l=20, r=20))
+    return fig
+
+
+def mostra_semaforo_mercato():
+    """Indicatore GENERALE di mercato (risk-on / risk-off), 1–5.
+
+    Risponde a: «conviene statisticamente investire ora su asset più rischiosi
+    (azioni) o più prudenti (obbligazioni/liquidità)?». È **indipendente dal
+    portafoglio**: si calcola su un benchmark azionario globale (vedi
+    ``BENCHMARK_MERCATO``). Mostra una barra colorata sempre visibile e un
+    pannello con il gauge e i dettagli.
+    """
+    close, usato = None, None
+    for b in BENCHMARK_MERCATO:
+        full = ohlcv(b, "max")
+        if not full.empty and "Close" in full.columns and len(full["Close"].dropna()) > 30:
+            close, usato = full["Close"], b
+            break
+    if close is None:
+        st.caption("ℹ️ Indicatore di mercato non disponibile al momento (dati assenti).")
+        return
+
+    sem = mtr.semaforo_rischio(close)
+    st.markdown(
+        f"<div style='background:{sem['colore']};padding:10px 18px;border-radius:10px;"
+        f"color:white;font-size:17px'>🌍 <b>Clima di mercato (risk-on / risk-off):</b> "
+        f"&nbsp;<b>{sem['banda']}/5</b> — {sem['etichetta']}</div>",
+        unsafe_allow_html=True,
+    )
+    with st.expander("ℹ️ Meglio investire ora su asset più rischiosi o più prudenti? (indicatore generale di mercato)"):
+        st.caption(
+            "Indicatore **generale e indipendente dal tuo portafoglio**: stima, su base statistica, "
+            "se il contesto di mercato è favorevole agli asset rischiosi (azioni) o a quelli prudenti "
+            "(obbligazioni/liquidità), con orizzonte orientativo di **circa 1 anno**. "
+            f"Calcolato sull'azionario globale (benchmark: {usato})."
+        )
+        cg, ci = st.columns([1, 1])
+        with cg:
+            st.plotly_chart(_figura_gauge(sem["valore"], "mercato"), width="stretch", key="gauge_mercato")
+        with ci:
+            st.markdown(
+                f"<div style='background:{sem['colore']};padding:16px 18px;border-radius:12px;"
+                f"color:white;text-align:center'>"
+                f"<div style='font-size:42px;font-weight:800;line-height:1'>{sem['banda']}/5</div>"
+                f"<div style='font-size:15px;margin-top:6px'>{sem['etichetta']}</div></div>",
+                unsafe_allow_html=True,
+            )
+            st.caption(
+                f"Componenti — Trend: {_segno(sem['trend'])} · "
+                f"Volatilità: {_segno(sem['volatilita'])} · "
+                f"Momentum: {_segno(sem['momentum'])}"
+            )
+        st.caption(
+            "Lettura: **5 = meglio asset rischiosi** (azioni) · 3 = neutro · **1 = meglio asset prudenti**. "
+            "Basato su trend (vs media 200gg), regime di volatilità e momentum a 6 mesi. "
+            "⚠️ Indicazione statistica/storica a scopo **didattico**, non un consiglio di investimento; "
+            "i mercati possono comportarsi diversamente."
+        )
+
+
 def mostra_lettura_statistica(prezzo: pd.Series, rendimenti: pd.Series, risk_free: float, chiave: str = ""):
-    """Disegna il semaforo del rischio (gauge 1–5) e gli indicatori statistici.
+    """Indicatori statistici specifici di un asset o del portafoglio.
+
+    (Il semaforo risk-on/off NON è qui: è un indicatore generale di mercato, in
+    cima all'app — vedi :func:`mostra_semaforo_mercato`.)
 
     - ``prezzo``: serie di livelli (prezzo dell'asset o ricchezza del portafoglio),
-      su cui si calcolano semaforo, valutazione caro/economico e RSI;
-    - ``rendimenti``: serie dei rendimenti, su cui si calcola il vantaggio statistico.
+      per valutazione caro/economico e RSI;
+    - ``rendimenti``: serie dei rendimenti, per il vantaggio statistico.
     """
-    sem = mtr.semaforo_rischio(prezzo)
     val = mtr.valutazione_prezzo(prezzo)
     rsi_serie = mtr.rsi(prezzo, 14).dropna()
     rsi_val = float(rsi_serie.iloc[-1]) if not rsi_serie.empty else float("nan")
     van = mtr.vantaggio_statistico(rendimenti, risk_free)
 
-    st.markdown("#### 🚦 Semaforo del rischio (1–5)")
-    cg, ci = st.columns([1, 1])
-    with cg:
-        fig = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=round(sem["valore"], 2),
-            number={"suffix": " / 5", "font": {"size": 34}},
-            gauge={
-                "axis": {"range": [1, 5], "tickvals": [1, 2, 3, 4, 5]},
-                "bar": {"color": "rgba(0,0,0,0)"},
-                "steps": [
-                    {"range": [1, 1.8], "color": "#b3261e"},
-                    {"range": [1.8, 2.6], "color": "#e8705f"},
-                    {"range": [2.6, 3.4], "color": "#bdbdbd"},
-                    {"range": [3.4, 4.2], "color": "#7fc97f"},
-                    {"range": [4.2, 5], "color": "#2e7d32"},
-                ],
-                "threshold": {"line": {"color": "black", "width": 5}, "thickness": 0.9, "value": sem["valore"]},
-            },
-        ))
-        fig.update_layout(height=240, margin=dict(t=10, b=10, l=20, r=20))
-        st.plotly_chart(fig, width="stretch", key=f"gauge_{chiave}")
-    with ci:
-        st.markdown(
-            f"<div style='background:{sem['colore']};padding:16px 18px;border-radius:12px;"
-            f"color:white;text-align:center'>"
-            f"<div style='font-size:42px;font-weight:800;line-height:1'>{sem['banda']}/5</div>"
-            f"<div style='font-size:15px;margin-top:6px'>{sem['etichetta']}</div></div>",
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            f"Componenti — Trend: {_segno(sem['trend'])} · "
-            f"Volatilità: {_segno(sem['volatilita'])} · "
-            f"Momentum: {_segno(sem['momentum'])}"
-        )
-
-    st.markdown("#### 🔎 Indicatori")
+    st.markdown("#### 🔎 Indicatori statistici")
     a, b, c = st.columns(3)
     premio = val.get("premio", np.nan)
     a.metric(
