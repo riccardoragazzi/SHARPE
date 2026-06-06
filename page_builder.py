@@ -127,8 +127,8 @@ if ris.valute:
 # Tab di analisi del portafoglio
 # ---------------------------------------------------------------------------
 
-tab_asset, tab_pf, tab_alloc, tab_opt = st.tabs(
-    ["📈 Singoli asset", "💼 Portafoglio", "🌍 Allocazione", "🧮 Ottimizzazione"]
+tab_asset, tab_pf, tab_alloc, tab_timing, tab_opt = st.tabs(
+    ["📈 Singoli asset", "💼 Portafoglio", "🌍 Allocazione", "⏱️ Timing", "🧮 Ottimizzazione"]
 )
 
 # === Singoli asset =========================================================
@@ -284,6 +284,66 @@ with tab_alloc:
             fig_bar.update_xaxes(tickformat=".0%")
             fig_bar.update_layout(yaxis={"categoryorder": "total ascending"})
             st.plotly_chart(fig_bar, width="stretch")
+
+# === Timing (rolling returns) =============================================
+with tab_timing:
+    st.subheader("Quanto avrebbe reso, a seconda di quando avresti investito")
+    st.caption(
+        "Ogni punto risponde a: «se avessi investito in **questo** giorno e tenuto il "
+        "portafoglio per la finestra scelta, quanto avrei guadagnato **in media all'anno**?». "
+        "Serve a capire quanto conta il *momento* in cui si entra. Usa **tutto** lo storico "
+        "disponibile (non l'intervallo nella barra laterale)."
+    )
+
+    FINESTRE = {"1 anno": 1, "3 anni": 3, "5 anni": 5, "10 anni": 10}
+    scelta_fin = st.radio("Finestra di investimento", list(FINESTRE.keys()), index=2, horizontal=True)
+    anni_fin = FINESTRE[scelta_fin]
+
+    # Scarica tutto lo storico comune disponibile per il portafoglio.
+    with st.spinner("Calcolo i rendimenti su tutto lo storico..."):
+        ris_max = cm.carica_dati(tuple(tickers_ok), "max", None, None, ss.valuta_base, ss.converti)
+
+    if ris_max.prezzi.empty:
+        st.warning("Storico non disponibile per il calcolo.")
+    else:
+        rend_max = mtr.rendimenti_giornalieri(ris_max.prezzi)
+        serie_pf_max = mtr.serie_rendimenti_portafoglio(rend_max, pesi)
+        roll = mtr.rolling_rendimenti_annualizzati(serie_pf_max, anni_fin)
+
+        anni_storico = (ris_max.prezzi.index.max() - ris_max.prezzi.index.min()).days / 365.25
+        if roll.empty:
+            st.warning(
+                f"Storico insufficiente: servono più di **{anni_fin} anni** di dati comuni a tutti "
+                f"gli asset, ma ne risultano circa **{anni_storico:.1f}**. Prova una finestra più corta "
+                "(es. 1 o 3 anni) o asset con storia più lunga."
+            )
+        else:
+            # Statistiche di sintesi.
+            peggiore, mediana, migliore = roll.min(), roll.median(), roll.max()
+            quota_pos = (roll > 0).mean()
+            s1, s2, s3, s4 = st.columns(4)
+            s1.metric("Peggiore", f"{peggiore:.2%}/anno")
+            s2.metric("Mediana", f"{mediana:.2%}/anno")
+            s3.metric("Migliore", f"{migliore:.2%}/anno")
+            s4.metric("Finestre positive", f"{quota_pos:.0%}", help="Quota di giorni di partenza che hanno dato un rendimento > 0.")
+
+            fig_roll = go.Figure()
+            fig_roll.add_trace(go.Scatter(
+                x=roll.index, y=roll.values, mode="lines",
+                name=f"Rend. annuo su {anni_fin} anni", line=dict(color="#1f77b4", width=1.6),
+                fill="tozeroy", fillcolor="rgba(31,119,180,0.12)",
+            ))
+            fig_roll.add_hline(y=float(mediana), line_dash="dash", line_color="orange",
+                               annotation_text=f"mediana {mediana:.1%}", annotation_position="top left")
+            fig_roll.add_hline(y=0, line_color="gray", opacity=0.5)
+            fig_roll.update_yaxes(tickformat=".0%", title_text=f"Rendimento medio annuo (finestra {anni_fin} anni)")
+            fig_roll.update_xaxes(title_text="Giorno in cui avresti investito")
+            fig_roll.update_layout(hovermode="x unified", margin=dict(t=20))
+            st.plotly_chart(fig_roll, width="stretch")
+            st.caption(
+                f"{len(roll)} possibili giorni di partenza analizzati su ~{anni_storico:.1f} anni di storico. "
+                "⚠️ I rendimenti passati non garantiscono quelli futuri."
+            )
 
 # === Ottimizzazione ========================================================
 with tab_opt:

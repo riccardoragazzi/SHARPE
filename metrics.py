@@ -267,6 +267,53 @@ def metriche_portafoglio(
     }
 
 
+def rolling_rendimenti_annualizzati(serie_rendimenti: pd.Series, anni: int) -> pd.Series:
+    """Rendimento **annualizzato** per ogni possibile giorno di investimento.
+
+    Per ciascuna data di partenza t calcola: se avessi investito quel giorno e
+    tenuto per ``anni`` anni, quanto avresti reso **in media all'anno** (CAGR).
+
+    Restituisce una Series indicizzata per data di partenza. Le date troppo
+    recenti (per cui la finestra di ``anni`` anni non rientra nello storico
+    disponibile) vengono escluse. Serve abbastanza storico: con finestre lunghe
+    i punti disponibili sono pochi.
+    """
+    r = serie_rendimenti.dropna()
+    if r.empty:
+        return pd.Series(dtype="float64")
+
+    # Indice della ricchezza (1 € investito che cresce).
+    ricchezza = (1.0 + r).cumprod()
+    date = ricchezza.index
+    valori = ricchezza.values
+    n = len(date)
+    if n == 0:
+        return pd.Series(dtype="float64")
+
+    # Per ogni partenza, la data obiettivo è t + "anni" (calendario).
+    obiettivi = date + pd.DateOffset(years=anni)
+    # Posizione dell'ultima data disponibile <= obiettivo.
+    pos = date.searchsorted(obiettivi, side="right") - 1
+    ultima = date[-1]
+
+    indici, rendimenti_ann = [], []
+    for i in range(n):
+        if obiettivi[i] > ultima:
+            continue  # finestra non completa nello storico
+        j = int(pos[i])
+        if j <= i:
+            continue
+        anni_eff = (date[j] - date[i]).days / 365.25
+        if anni_eff <= 0:
+            continue
+        rapporto = valori[j] / valori[i]
+        ann = -1.0 if rapporto <= 0 else rapporto ** (1.0 / anni_eff) - 1.0
+        indici.append(date[i])
+        rendimenti_ann.append(ann)
+
+    return pd.Series(rendimenti_ann, index=pd.DatetimeIndex(indici))
+
+
 # ---------------------------------------------------------------------------
 # Allocazione paese / settore
 # ---------------------------------------------------------------------------
