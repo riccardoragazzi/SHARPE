@@ -40,13 +40,36 @@ ticker = st.selectbox(
     format_func=lambda t: f"{nomi.get(t, t)}  ({t})",
 )
 
-c1, c2, c3 = st.columns([3, 2, 2])
-intervallo = c1.radio(
+intervallo = st.radio(
     "Intervallo", ["YTD", "1A", "3A", "5A", "10A", "max"], index=3, horizontal=True
 )
-medie = c2.multiselect("Medie mobili (giorni)", [20, 50, 100, 200], default=[50, 200])
-mostra_volume = c3.checkbox("Volumi", value=True)
-mostra_rsi = c3.checkbox("RSI (14)", value=True)
+
+
+def _parse_periodi(testo: str) -> list[int]:
+    """Estrae una lista di periodi (interi) da un testo tipo '20, 50, 200'."""
+    periodi = []
+    for pezzo in testo.replace(";", ",").split(","):
+        pezzo = pezzo.strip()
+        if pezzo.isdigit():
+            v = int(pezzo)
+            if 1 <= v <= 1000:
+                periodi.append(v)
+    return sorted(set(periodi))
+
+
+with st.expander("⚙️ Indicatori da mostrare", expanded=True):
+    cc1, cc2 = st.columns(2)
+    with cc1:
+        tipo_media = st.radio("Tipo di media mobile", ["SMA", "EMA"], horizontal=True)
+        testo_periodi = st.text_input(
+            "Periodi medie mobili (giorni, separati da virgola)", value="50, 200",
+            help="Scrivi i periodi che vuoi, es. 20, 50, 100, 200. Lascia vuoto per non mostrarne.",
+        )
+        medie = _parse_periodi(testo_periodi)
+    with cc2:
+        mostra_volume = st.checkbox("Mostra volumi", value=True)
+        mostra_rsi = st.checkbox("Mostra RSI", value=True)
+        periodo_rsi = st.number_input("Periodo RSI", min_value=2, max_value=100, value=14, step=1, disabled=not mostra_rsi)
 
 # ---------------------------------------------------------------------------
 # Dati OHLCV (tutto lo storico) + indicatori, poi ritaglio sull'intervallo
@@ -62,8 +85,11 @@ if full.empty or "Close" not in full.columns:
 close_full = full["Close"]
 # Gli indicatori si calcolano sull'intero storico, così sono corretti anche
 # al bordo sinistro della finestra visualizzata.
-sma_full = {p: mtr.media_mobile(close_full, p) for p in medie}
-rsi_full = mtr.rsi(close_full)
+if tipo_media == "EMA":
+    ma_full = {p: mtr.media_mobile_esp(close_full, p) for p in medie}
+else:
+    ma_full = {p: mtr.media_mobile(close_full, p) for p in medie}
+rsi_full = mtr.rsi(close_full, int(periodo_rsi))
 
 
 def _data_taglio(intervallo: str, ultima: pd.Timestamp):
@@ -133,7 +159,7 @@ fig.add_trace(
 # Medie mobili sovrapposte al prezzo.
 for p in medie:
     fig.add_trace(
-        go.Scatter(x=df.index, y=sma_full[p].loc[df.index], mode="lines", name=f"SMA {p}", line=dict(width=1.3)),
+        go.Scatter(x=df.index, y=ma_full[p].loc[df.index], mode="lines", name=f"{tipo_media} {p}", line=dict(width=1.3)),
         row=1, col=1,
     )
 
@@ -150,7 +176,7 @@ if mostra_volume and "Volume" in df.columns:
 if mostra_rsi:
     riga_corrente += 1
     rsi_s = rsi_full.loc[df.index]
-    fig.add_trace(go.Scatter(x=df.index, y=rsi_s, mode="lines", name="RSI(14)", line=dict(color="#7e57c2")), row=riga_corrente, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=rsi_s, mode="lines", name=f"RSI({int(periodo_rsi)})", line=dict(color="#7e57c2")), row=riga_corrente, col=1)
     # Soglie 70 (ipercomprato) e 30 (ipervenduto).
     fig.add_hline(y=70, line_dash="dash", line_color="red", opacity=0.5, row=riga_corrente, col=1)
     fig.add_hline(y=30, line_dash="dash", line_color="green", opacity=0.5, row=riga_corrente, col=1)

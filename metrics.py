@@ -522,6 +522,11 @@ def media_mobile(prezzi: pd.Series, finestra: int) -> pd.Series:
     return prezzi.rolling(int(finestra), min_periods=1).mean()
 
 
+def media_mobile_esp(prezzi: pd.Series, finestra: int) -> pd.Series:
+    """Media mobile esponenziale (EMA) sui prezzi, con span ``finestra``."""
+    return prezzi.ewm(span=int(finestra), adjust=False).mean()
+
+
 def rsi(prezzi: pd.Series, periodo: int = 14) -> pd.Series:
     """Relative Strength Index (RSI) con smoothing di Wilder.
 
