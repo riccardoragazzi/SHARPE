@@ -57,6 +57,14 @@ PORTAFOGLI_FAMOSI = {
     "Permanent Portfolio": {"VTI": 0.25, "TLT": 0.25, "SHY": 0.25, "GLD": 0.25},
 }
 
+# Portafogli "pronti" da caricare nel Builder, con ETF UCITS realmente
+# acquistabili (in EUR su Borsa Italiana / Xetra). Pesi in %.
+PORTAFOGLI_PRONTI = {
+    "3-fund (Mondo + Emergenti + Obblig.)": {"SWDA.MI": 60.0, "EIMI.MI": 20.0, "AGGH.MI": 20.0},
+    "60/40 (azioni/obbligazioni)": {"SWDA.MI": 60.0, "AGGH.MI": 40.0},
+    "All-world 100% azioni": {"VWCE.DE": 100.0},
+}
+
 
 # ---------------------------------------------------------------------------
 # Funzioni con cache (evitano chiamate di rete ripetute ad ogni interazione)
@@ -227,6 +235,32 @@ def cb_applica_pesi(pesi_frazioni: dict):
     for t, frazione in pesi_frazioni.items():
         if f"w_{t}" in ss or t in ss.selezionati["Ticker"].values:
             ss[f"w_{t}"] = round(float(frazione) * 100.0, 2)
+
+
+def cb_carica_preset(nome: str):
+    """Carica un «portafoglio pronto» sostituendo gli asset/pesi attuali."""
+    pesi_def = PORTAFOGLI_PRONTI.get(nome, {})
+    if not pesi_def:
+        return
+    tickers = list(pesi_def.keys())
+    nm = nomi_di(tuple(tickers))
+    ss.selezionati = pd.DataFrame({
+        "Ticker": tickers,
+        "Nome": [nm.get(t, t) for t in tickers],
+        "Peso %": [pesi_def[t] for t in tickers],
+    })
+    for k in [k for k in list(ss.keys()) if str(k).startswith("w_")]:
+        del ss[k]
+
+
+def cb_normalizza():
+    """Riscala i pesi correnti così che sommino esattamente a 100%."""
+    tickers = ss.selezionati["Ticker"].tolist()
+    tot = sum(float(ss.get(f"w_{t}", 0.0)) for t in tickers)
+    if tot <= 0:
+        return
+    for t in tickers:
+        ss[f"w_{t}"] = round(float(ss.get(f"w_{t}", 0.0)) / tot * 100.0, 2)
 
 
 # ---------------------------------------------------------------------------

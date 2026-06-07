@@ -623,24 +623,37 @@ def _peso_minimo(frazione_minima: float, n: int, long_only: bool) -> float:
     return alpha / n
 
 
+def _limiti_peso(frazione_minima: float, n: int, long_only: bool, peso_max: float = 1.0):
+    """Restituisce ``(lower, upper)`` per i pesi nell'ottimizzazione.
+
+    In long-only: lower = L = α·(1/N) (quota minima); upper = ``peso_max`` (cap
+    massimo per asset) clampato a ≥ 1/N — così la somma può comunque arrivare a 1
+    — e con L ≤ upper. Con gli short ammessi: ``(-1, 1)``.
+    """
+    if not long_only:
+        return -1.0, 1.0
+    L = _peso_minimo(frazione_minima, n, long_only)
+    pm = min(1.0, max(float(peso_max), 1.0 / n))
+    return min(L, pm), pm
+
+
 def pesi_minima_varianza(
-    rendimenti: pd.DataFrame, long_only: bool = True, frazione_minima: float = 0.0
+    rendimenti: pd.DataFrame, long_only: bool = True, frazione_minima: float = 0.0,
+    peso_max: float = 1.0,
 ) -> pd.Series:
     """Pesi del portafoglio a minima varianza globale.
 
-    Con ``long_only=True`` e scipy disponibile si impone L ≤ w ≤ 1 e Σw = 1
-    tramite ottimizzazione, dove L = ``frazione_minima``·(1/N) è la quota
-    minima per asset (vedi :func:`_peso_minimo`). Senza scipy (o con short
-    ammessi) si usa la soluzione analitica non vincolata, che può dare pesi
-    negativi e non rispetta la soglia minima.
+    Con ``long_only=True`` e scipy disponibile si impone L ≤ w ≤ ``peso_max`` e
+    Σw = 1 tramite ottimizzazione (L = quota minima, ``peso_max`` = cap per asset).
+    Senza scipy (o con short ammessi) si usa la soluzione analitica non vincolata.
     """
     colonne = list(rendimenti.columns)
     n = len(colonne)
     sigma = matrice_covarianza_annua(rendimenti).values
-    L = _peso_minimo(frazione_minima, n, long_only)
+    lo, hi = _limiti_peso(frazione_minima, n, long_only, peso_max)
 
     # Caso limite: soglia = quota equa -> unico portafoglio ammissibile (equipeso).
-    if long_only and n * L >= 1.0 - 1e-9:
+    if long_only and n * lo >= 1.0 - 1e-9:
         return pd.Series(1.0 / n, index=colonne)
 
     if long_only and SCIPY_DISPONIBILE:
@@ -648,7 +661,7 @@ def pesi_minima_varianza(
             return float(w @ sigma @ w)
 
         vincoli = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}]
-        limiti = [(L, 1.0)] * n
+        limiti = [(lo, hi)] * n
         w0 = np.full(n, 1.0 / n)
         res = minimize(varianza, w0, method="SLSQP", bounds=limiti, constraints=vincoli)
         w = res.x if res.success else w0
@@ -668,6 +681,7 @@ def frontiera_efficiente(
     n_punti: int = 40,
     long_only: bool = True,
     frazione_minima: float = 0.0,
+    peso_max: float = 1.0,
 ) -> pd.DataFrame:
     """Calcola la frontiera efficiente (richiede scipy).
 
@@ -685,12 +699,12 @@ def frontiera_efficiente(
     n = len(colonne)
     sigma = matrice_covarianza_annua(rendimenti).values
     mu = rendimenti.mean().values * GIORNI_BORSA  # rendimento medio annuo per asset
-    L = _peso_minimo(frazione_minima, n, long_only)
+    lo, hi = _limiti_peso(frazione_minima, n, long_only, peso_max)
 
     target_min, target_max = mu.min(), mu.max()
     obiettivi = np.linspace(target_min, target_max, n_punti)
 
-    limiti = [(L, 1.0)] * n if long_only else [(-1.0, 1.0)] * n
+    limiti = [(lo, hi)] * n
     w0 = np.full(n, 1.0 / n)
 
     punti = []
@@ -714,26 +728,36 @@ def frontiera_efficiente(
 
 
 def pesi_massimo_rendimento(
-    rendimenti: pd.DataFrame, long_only: bool = True, frazione_minima: float = 0.0
+    rendimenti: pd.DataFrame, long_only: bool = True, frazione_minima: float = 0.0,
+    peso_max: float = 1.0,
 ) -> pd.Series:
     """Pesi che massimizzano il rendimento medio annuo atteso.
 
-    Senza quota minima (``frazione_minima`` = 0) la soluzione long-only è
-    degenere: tutto il capitale sull'asset col rendimento medio storico più
-    alto. Con una quota minima L = α·(1/N) per asset, l'obiettivo lineare è
-    massimizzato mettendo L su ogni asset e il resto (1 − N·L) sull'asset col
-    rendimento atteso maggiore: così nessun asset è a zero.
+    Obiettivo lineare con vincoli L ≤ w ≤ ``peso_max`` e Σw = 1: si mette la quota
+    minima L su ogni asset e si distribuisce il resto, in modo **greedy**, sugli
+    asset col rendimento atteso più alto fino al cap ``peso_max``. Così, con un
+    cap < 100%, il rendimento non si concentra tutto su un solo asset.
     """
     colonne = list(rendimenti.columns)
     n = len(colonne)
     mu = rendimenti.mean().values * GIORNI_BORSA  # rendimento medio annuo per asset
-    L = _peso_minimo(frazione_minima, n, long_only)
+    lo, hi = _limiti_peso(frazione_minima, n, long_only, peso_max)
 
-    if long_only and n * L >= 1.0 - 1e-9:
+    if not long_only:
+        w = np.zeros(n)
+        w[int(np.argmax(mu))] = 1.0
+        return pd.Series(w, index=colonne)
+    if n * lo >= 1.0 - 1e-9:
         return pd.Series(1.0 / n, index=colonne)
 
-    w = np.full(n, L)
-    w[int(np.argmax(mu))] += 1.0 - n * L  # il residuo va sull'asset migliore
+    w = np.full(n, lo)
+    rimanente = 1.0 - n * lo
+    for idx in np.argsort(mu)[::-1]:  # dagli asset col rendimento più alto
+        aggiunta = min(hi - lo, rimanente)
+        w[int(idx)] += aggiunta
+        rimanente -= aggiunta
+        if rimanente <= 1e-12:
+            break
     return pd.Series(w, index=colonne)
 
 
@@ -742,21 +766,21 @@ def pesi_massimo_sharpe(
     risk_free: float = 0.0,
     long_only: bool = True,
     frazione_minima: float = 0.0,
+    peso_max: float = 1.0,
 ) -> pd.Series:
     """Pesi che massimizzano l'indice di Sharpe (portafoglio di tangenza).
 
-    Massimizza (wᵀμ − rf) / √(wᵀ Σ w) con Σ e μ annualizzati, somma pesi = 1 e
-    quota minima L = α·(1/N) per asset (in long-only). Usa scipy se disponibile;
-    altrimenti ripiega sulla soluzione analitica di tangenza w ∝ Σ⁻¹ (μ − rf)
-    (che può dare pesi negativi e non rispetta la soglia minima).
+    Massimizza (wᵀμ − rf) / √(wᵀ Σ w) con Σ e μ annualizzati, Σw = 1 e vincoli
+    L ≤ w ≤ ``peso_max`` (in long-only). Usa scipy se disponibile; altrimenti la
+    soluzione analitica di tangenza w ∝ Σ⁻¹ (μ − rf) (può dare pesi negativi).
     """
     colonne = list(rendimenti.columns)
     n = len(colonne)
     sigma = matrice_covarianza_annua(rendimenti).values
     mu = rendimenti.mean().values * GIORNI_BORSA
-    L = _peso_minimo(frazione_minima, n, long_only)
+    lo, hi = _limiti_peso(frazione_minima, n, long_only, peso_max)
 
-    if long_only and n * L >= 1.0 - 1e-9:
+    if long_only and n * lo >= 1.0 - 1e-9:
         return pd.Series(1.0 / n, index=colonne)
 
     if not SCIPY_DISPONIBILE:
@@ -773,11 +797,49 @@ def pesi_massimo_sharpe(
         return -(ret - risk_free) / vol
 
     vincoli = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}]
-    limiti = [(L, 1.0)] * n if long_only else [(-1.0, 1.0)] * n
+    limiti = [(lo, hi)] * n
     w0 = np.full(n, 1.0 / n)
     res = minimize(neg_sharpe, w0, method="SLSQP", bounds=limiti, constraints=vincoli)
     w = res.x if res.success else w0
     return pd.Series(w, index=colonne)
+
+
+def pesi_risk_parity(rendimenti: pd.DataFrame, peso_max: float = 1.0) -> pd.Series:
+    """Pesi a **parità di rischio** (Equal Risk Contribution, ERC).
+
+    Cerca pesi (long-only, Σw = 1) per cui **ogni asset contribuisce alla stessa
+    misura** alla volatilità del portafoglio. Risultato: gli asset più volatili
+    pesano meno, quelli più tranquilli di più. Con scipy minimizza la varianza dei
+    contributi al rischio; senza scipy usa il proxy "inverse volatility".
+    """
+    colonne = list(rendimenti.columns)
+    n = len(colonne)
+    if n < 2:
+        return pd.Series(1.0 / max(n, 1), index=colonne)
+    sigma = matrice_covarianza_annua(rendimenti).values
+
+    if not SCIPY_DISPONIBILE:
+        vol = np.sqrt(np.diag(sigma))
+        w = (1.0 / vol)
+        return pd.Series(w / w.sum(), index=colonne)
+
+    def obiettivo(w):
+        var = float(w @ sigma @ w)
+        if var <= 1e-12:
+            return 0.0
+        # Contributi al rischio in frazione (sommano a 1); target = 1/n per ciascuno.
+        pct = (w * (sigma @ w)) / var
+        return float(np.sum((pct - 1.0 / n) ** 2))
+
+    hi = min(1.0, max(float(peso_max), 1.0 / n))
+    vincoli = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}]
+    limiti = [(1e-6, hi)] * n
+    w0 = np.full(n, 1.0 / n)
+    res = minimize(obiettivo, w0, method="SLSQP", bounds=limiti, constraints=vincoli,
+                   options={"maxiter": 500, "ftol": 1e-12})
+    w = res.x if res.success else w0
+    w = np.clip(w, 0.0, None)
+    return pd.Series(w / w.sum(), index=colonne)
 
 
 def pesi_ottimizzati(
@@ -786,21 +848,22 @@ def pesi_ottimizzati(
     risk_free: float = 0.0,
     long_only: bool = True,
     frazione_minima: float = 0.0,
+    peso_max: float = 1.0,
 ) -> pd.Series:
     """Dispatcher: restituisce i pesi ottimali per l'obiettivo scelto.
 
-    ``obiettivo`` ∈ {"min_var", "max_ret", "max_sharpe"}.
-    ``frazione_minima`` è la quota minima per asset come frazione della quota
-    equipesata (α in L = α·(1/N)); 0 = nessun vincolo.
+    ``obiettivo`` ∈ {"min_var", "max_ret", "max_sharpe", "risk_parity"}.
+    ``frazione_minima`` = quota minima per asset (α in L = α·(1/N)); ``peso_max`` =
+    cap massimo per asset (frazione).
     """
     if obiettivo == "min_var":
-        return pesi_minima_varianza(rendimenti, long_only=long_only, frazione_minima=frazione_minima)
+        return pesi_minima_varianza(rendimenti, long_only, frazione_minima, peso_max)
     if obiettivo == "max_ret":
-        return pesi_massimo_rendimento(rendimenti, long_only=long_only, frazione_minima=frazione_minima)
+        return pesi_massimo_rendimento(rendimenti, long_only, frazione_minima, peso_max)
     if obiettivo == "max_sharpe":
-        return pesi_massimo_sharpe(
-            rendimenti, risk_free=risk_free, long_only=long_only, frazione_minima=frazione_minima
-        )
+        return pesi_massimo_sharpe(rendimenti, risk_free, long_only, frazione_minima, peso_max)
+    if obiettivo == "risk_parity":
+        return pesi_risk_parity(rendimenti, peso_max)
     raise ValueError(f"Obiettivo non riconosciuto: {obiettivo}")
 
 

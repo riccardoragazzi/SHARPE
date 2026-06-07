@@ -56,12 +56,21 @@ with st.container(border=True):
 with st.container(border=True):
     st.markdown("### 📋 Portafoglio (asset selezionati e pesi)")
 
+    # Portafogli "pronti" da caricare con un clic.
+    pp1, pp2 = st.columns([3, 1])
+    preset_sel = pp1.selectbox(
+        "Portafogli pronti", ["—"] + list(cm.PORTAFOGLI_PRONTI.keys()),
+        help="Carica un portafoglio già pronto e diversificato (sostituisce gli asset attuali).",
+    )
+    pp2.button("📥 Carica preset", on_click=cm.cb_carica_preset, args=(preset_sel,),
+               disabled=(preset_sel == "—"), width="stretch")
+
     sel = cm.portafoglio_pulito()
     if sel.empty:
-        st.info("Nessun asset selezionato. Usa la ricerca qui sopra per aggiungerne.")
+        st.info("Nessun asset selezionato. Usa la ricerca qui sopra, oppure carica un **portafoglio pronto**.")
         st.stop()
 
-    h1, h2, h3 = st.columns([6, 2, 1])
+    h1, h2, h3 = st.columns([5, 4, 1])
     h1.markdown("**Asset**")
     h2.markdown("**Peso %**")
     h3.markdown("**Rimuovi**")
@@ -71,20 +80,22 @@ with st.container(border=True):
         t = riga["Ticker"]
         nome = riga["Nome"]
         if f"w_{t}" not in ss:
-            ss[f"w_{t}"] = float(riga["Peso %"]) if pd.notna(riga["Peso %"]) else 0.0
-        col1, col2, col3 = st.columns([6, 2, 1])
+            ss[f"w_{t}"] = round(float(riga["Peso %"]), 2) if pd.notna(riga["Peso %"]) else 0.0
+        col1, col2, col3 = st.columns([5, 4, 1])
         col1.markdown(f"**{nome}**  \n`{t}`")
-        col2.number_input("Peso %", min_value=0.0, step=1.0, key=f"w_{t}", label_visibility="collapsed")
+        col2.slider("Peso %", min_value=0.0, max_value=100.0, step=1.0, key=f"w_{t}", label_visibility="collapsed")
         col3.button("🗑", key=f"del_{t}", on_click=cm.cb_rimuovi, args=(t,))
         pesi_correnti[t] = ss[f"w_{t}"]
 
     ss.selezionati = sel.assign(**{"Peso %": [pesi_correnti[t] for t in sel["Ticker"]]})
 
-    azione1, azione2, azione3 = st.columns([1, 1, 2])
+    azione1, azione2, azione3, azione4 = st.columns([1, 1, 1, 1])
     azione1.button("⚖️ Equipesati", on_click=cm.cb_equipesati, width="stretch")
-    azione2.button("🧹 Svuota", on_click=cm.cb_svuota, width="stretch")
+    azione2.button("🎯 Normalizza a 100%", on_click=cm.cb_normalizza, width="stretch",
+                   help="Riscala i pesi così che sommino esattamente a 100%.")
+    azione3.button("🧹 Svuota", on_click=cm.cb_svuota, width="stretch")
     tot = sum(pesi_correnti.values())
-    azione3.metric("Somma pesi", f"{tot:.1f}%", help="I pesi vengono normalizzati a 100% per i calcoli.")
+    azione4.metric("Somma pesi", f"{tot:.1f}%", help="I pesi vengono comunque normalizzati a 100% per i calcoli.")
 
 tickers = sel["Ticker"].tolist()
 pesi_input = pd.Series([pesi_correnti[t] for t in tickers], index=tickers)
@@ -652,13 +663,24 @@ with tab_opt:
     else:
         OBIETTIVI = {
             "Minima varianza (minimo rischio)": "min_var",
-            "Massimo rendimento annuo": "max_ret",
+            "Risk parity (parità di rischio)": "risk_parity",
             "Massimo indice di Sharpe (tangenza)": "max_sharpe",
+            "Massimo rendimento annuo": "max_ret",
         }
         col_ob, col_lo = st.columns([2, 1])
-        scelta = col_ob.selectbox("Obiettivo", list(OBIETTIVI.keys()), index=0)
+        scelta = col_ob.selectbox(
+            "Obiettivo", list(OBIETTIVI.keys()), index=0,
+            help="Minima varianza = minor rischio. Risk parity = ogni asset contribuisce ugualmente "
+                 "al rischio. Max Sharpe = miglior rendimento/rischio storico. Max rendimento = solo rendimento.")
         obiettivo = OBIETTIVI[scelta]
-        long_only = col_lo.checkbox("Solo posizioni long (pesi ≥ 0)", value=True)
+        long_only = col_lo.checkbox("Solo posizioni long (pesi ≥ 0)", value=True,
+                                    help="Lascia attivo: niente vendite allo scoperto.")
+        if obiettivo in ("max_sharpe", "max_ret"):
+            st.warning(
+                "ℹ️ «Massimo Sharpe» e «Massimo rendimento» guardano **solo al passato** e tendono a "
+                "**concentrare** su pochi asset: il passato non si ripete uguale. Per un portafoglio più "
+                "equilibrato valuta **Minima varianza** o **Risk parity**."
+            )
         if not mtr.SCIPY_DISPONIBILE:
             st.caption("scipy non disponibile: si usano soluzioni analitiche (possono dare pesi negativi).")
 
@@ -676,11 +698,17 @@ with tab_opt:
                 f"Con {n_asset} asset la quota equipesata è {quota_equa:.1%}: ogni asset peserà "
                 f"**almeno {soglia_assoluta:.1%}** (e **al massimo {1 - (n_asset - 1) * soglia_assoluta:.1%}**)."
             )
+            cap_min = max(5, -(-100 // n_asset))  # ceil(100/n): cap minimo ammissibile
+            cap_perc = st.slider(
+                "Cap massimo per asset (%)", min_value=int(cap_min), max_value=100, value=100, step=5,
+                help="Tetto al peso di ogni singolo asset, per non concentrare troppo. 100% = nessun tetto.")
+            peso_max = cap_perc / 100.0
         else:
             frazione_minima = 0.0
-            st.caption("Quota minima per asset disattivata: si applica solo in modalità long-only.")
+            peso_max = 1.0
+            st.caption("Quota minima e cap per asset si applicano solo in modalità long-only.")
 
-        w_opt = mtr.pesi_ottimizzati(rendimenti, obiettivo, risk_free, long_only, frazione_minima)
+        w_opt = mtr.pesi_ottimizzati(rendimenti, obiettivo, risk_free, long_only, frazione_minima, peso_max)
         met_opt = mtr.metriche_portafoglio(rendimenti, w_opt, risk_free)
 
         if obiettivo == "max_ret" and long_only:
@@ -731,7 +759,7 @@ with tab_opt:
 
         st.subheader("Frontiera efficiente")
         if mtr.SCIPY_DISPONIBILE:
-            front = mtr.frontiera_efficiente(rendimenti, n_punti=40, long_only=long_only, frazione_minima=frazione_minima)
+            front = mtr.frontiera_efficiente(rendimenti, n_punti=40, long_only=long_only, frazione_minima=frazione_minima, peso_max=peso_max)
             if not front.empty:
                 fig_f = go.Figure()
                 fig_f.add_trace(go.Scatter(x=front["vol"], y=front["rend"], mode="lines", name="Frontiera"))
