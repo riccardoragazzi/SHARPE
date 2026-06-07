@@ -129,6 +129,8 @@ if full.empty or "Close" not in full.columns:
     st.error(f"Dati non disponibili per **{nome_asset}** ({ticker}).")
     st.stop()
 
+cm.mostra_avvisi_qualita(full[["Close"]])
+
 close_full = full["Close"]
 # Gli indicatori si calcolano sull'intero storico, così sono corretti anche
 # al bordo sinistro della finestra visualizzata.
@@ -260,3 +262,5 @@ st.caption(
     "sull'**intervallo selezionato**. (Il semaforo risk-on/off generale è in cima all'app.)"
 )
 cm.mostra_lettura_statistica(close_full, rend, risk_free, chiave=f"asset_{ticker}")
+
+cm.mostra_glossario()

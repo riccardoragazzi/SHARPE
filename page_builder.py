@@ -134,6 +134,9 @@ if ris.valute:
     valute_txt = ", ".join(f"{nomi.get(t, t)}: {c}" for t, c in ris.valute.items())
     st.caption(f"Valute native rilevate — {valute_txt}")
 
+# Avvisi sulla qualità dei dati (storico corto, buchi, anomalie).
+cm.mostra_avvisi_qualita(prezzi)
+
 # ---------------------------------------------------------------------------
 # Riepilogo automatico (in italiano semplice)
 # ---------------------------------------------------------------------------
@@ -153,6 +156,8 @@ with st.expander("Come leggo questo riepilogo?"):
         "oscillazioni di breve periodo.\n\n"
         "_È una descrizione statistica/didattica, non un consiglio di investimento._"
     )
+
+cm.mostra_glossario()
 
 # ---------------------------------------------------------------------------
 # Tab di analisi del portafoglio
@@ -190,14 +195,21 @@ with tab_pf:
     met_pf = mtr.metriche_portafoglio(rendimenti, pesi, risk_free)
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Rend. annuo (CAGR)", f"{met_pf['Rend. annuo (CAGR)']:.2%}")
-    c2.metric("Volatilità (covarianza)", f"{met_pf['Volatilità annua (covarianza)']:.2%}")
-    c3.metric("Sharpe", f"{met_pf['Sharpe']:.2f}")
-    c4.metric("Sortino", f"{met_pf['Sortino']:.2f}")
+    c1.metric("Rend. annuo (CAGR)", f"{met_pf['Rend. annuo (CAGR)']:.2%}",
+              help="Crescita media all'anno nel periodo. Più alto è meglio, ma guardalo col rischio.")
+    c2.metric("Volatilità (covarianza)", f"{met_pf['Volatilità annua (covarianza)']:.2%}",
+              help="Quanto oscilla il valore: <8% basso, 8–15% medio, >15% alto.")
+    c3.metric("Sharpe", f"{met_pf['Sharpe']:.2f}",
+              help="Rendimento per unità di rischio: >1 buono, >2 ottimo, <0 il rischio non ha pagato.")
+    c4.metric("Sortino", f"{met_pf['Sortino']:.2f}",
+              help="Come lo Sharpe ma conta solo le oscillazioni verso il basso (le perdite).")
     c5, c6, c7 = st.columns(3)
-    c5.metric("Max drawdown", f"{met_pf['Max drawdown']:.2%}")
-    c6.metric("Rend. cumulato", f"{met_pf['Rend. cumulato']:.2%}")
-    c7.metric("Volatilità (serie)", f"{met_pf['Volatilità annua (serie)']:.2%}")
+    c5.metric("Max drawdown", f"{met_pf['Max drawdown']:.2%}",
+              help="Perdita massima dal picco al minimo successivo. Più vicino a 0 è meglio.")
+    c6.metric("Rend. cumulato", f"{met_pf['Rend. cumulato']:.2%}",
+              help="Guadagno totale nel periodo analizzato.")
+    c7.metric("Volatilità (serie)", f"{met_pf['Volatilità annua (serie)']:.2%}",
+              help="Volatilità calcolata sui rendimenti del portafoglio (di norma uguale a quella da covarianza).")
 
     st.subheader("Portafoglio vs singoli asset (base 100)")
     serie_pf = mtr.serie_rendimenti_portafoglio(rendimenti, pesi)

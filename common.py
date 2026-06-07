@@ -370,6 +370,31 @@ def portafoglio_pulito() -> pd.DataFrame:
     return sel
 
 
+def mostra_avvisi_qualita(prezzi: pd.DataFrame):
+    """Mostra gli avvisi di qualità dei dati (storico, buchi, anomalie)."""
+    for livello, msg in dati.controlla_qualita(prezzi):
+        (st.warning if livello == "warning" else st.info)("🔎 " + msg)
+
+
+def mostra_glossario():
+    """Glossario didattico delle metriche principali (in italiano semplice)."""
+    with st.expander("📖 Glossario delle metriche (cosa significano e cosa è «buono»)"):
+        st.markdown(
+            "- **Rendimento annuo (CAGR)** — di quanto è cresciuto in media ogni anno. "
+            "Più alto è meglio, ma va guardato **insieme al rischio**.\n"
+            "- **Volatilità annua** — quanto oscilla il valore: più bassa = più tranquillo. "
+            "Indicativo: sotto 8% basso, 8–15% medio, oltre 15% alto.\n"
+            "- **Sharpe** — rendimento ottenuto per ogni unità di rischio (oltre il risk-free). "
+            "Indicativo: **>1 buono, >2 ottimo, <0** il rischio non è stato ripagato.\n"
+            "- **Sortino** — come lo Sharpe, ma considera solo le oscillazioni **verso il basso** "
+            "(le perdite). Più alto è meglio.\n"
+            "- **Max drawdown** — la perdita massima dal punto più alto a quello più basso "
+            "(es. −30% = a un certo punto avresti perso il 30% dal picco). Più vicino a 0 è meglio.\n"
+            "- **Rendimento cumulato** — quanto hai guadagnato in **totale** nel periodo.\n\n"
+            "_Valori indicativi e didattici: dipendono dal periodo analizzato e non sono garanzie._"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Componente UI: "lettura statistica" (semaforo + indicatori)
 # ---------------------------------------------------------------------------

@@ -24,44 +24,47 @@ benchmark azionario globale).
 L'app è divisa in due sezioni (menu a lato):
 
 ### 🧱 Builder — costruzione e analisi del portafoglio
-- **Ricerca online**: cerca ETF/indici per nome o ticker (dati da Yahoo
-  Finance), selezionali e assegna i pesi. Gli asset sono mostrati con il loro
-  **nome reale**, non con il ticker.
-- **Singoli asset**: CAGR, volatilità, Sharpe, Sortino, max drawdown, rendimento
-  cumulato; andamento normalizzato a 100 e grafico dei drawdown.
-- **Portafoglio**: metriche complessive con volatilità dalla **matrice di
-  covarianza** (σₚ = √(wᵀ Σ w)), confronto portafoglio vs singoli asset,
-  **heatmap di correlazione** e **contributo di ciascun asset al rischio**.
-- **Allocazione**: distribuzione per **paese** e **settore** (recupero settori
-  da yfinance dove disponibile e/o inserimento manuale / da CSV).
-- **⏱️ Timing** (rolling returns): per ogni giorno di partenza, quanto avrebbe
-  reso il portafoglio **in % all'anno** tenendolo per una finestra fissa
-  (1 / 3 / 5 / 10 anni). Mostra quanto conta il momento d'ingresso, con
-  peggiore/mediana/migliore e % di finestre positive. Usa tutto lo storico.
-- **📊 Statistica**: indicatori del portafoglio — prezzo vs media storica
-  (caro/economico), RSI, vantaggio statistico (Sharpe + % di anni positivi).
-- **🧮 Ottimizzazione**: pesi ottimali per tre obiettivi — **minima varianza**,
-  **massimo rendimento annuo**, **massimo Sharpe** (tangenza) — con **frontiera
-  efficiente** e pulsante per applicare i pesi (richiede `scipy`). Una **quota
-  minima per asset** (slider, % della quota equipesata: L = α·1/N) evita che un
-  asset vada a 0% e resta sempre ammissibile al variare del numero di asset.
-- **🆚 Confronto**: confronta il tuo portafoglio (grafico base 100 + tabella di
-  statistiche) con singoli ETF/indici e con **portafogli famosi** (60/40, All
-  Weather, Golden Butterfly, Permanent Portfolio), ricostruiti con ETF proxy.
+- **Ricerca online** (per nome / ticker / ISIN) e **portafogli pronti**
+  (3-fund, 60/40, All-world) caricabili con un clic; pesi via **slider** con
+  **Equipesati** e **Normalizza a 100%**. Asset mostrati col **nome reale**.
+- **🧭 Riepilogo automatico** in italiano semplice (diversificazione, rischio,
+  coerenza con l'orizzonte).
+- **Singoli asset / Portafoglio**: CAGR, volatilità, Sharpe, Sortino, max
+  drawdown, cumulato; volatilità dalla **covarianza** (σₚ=√(wᵀΣw)); **heatmap di
+  correlazione** con **alert su asset troppo correlati**; **contributo al
+  rischio**; confronto sempre presente con **MSCI World** e **60/40**.
+- **🌍 Allocazione**: per **classe di attività** (azioni/obbligazioni/liquidità,
+  auto da Yahoo), per **paese** e **settore** (auto e/o manuale / CSV).
+- **⏱️ Timing** (rolling returns): rendimento **% annuo** per ogni giorno di
+  partenza, finestre 1/3/5/10/15/20/Massima; peggiore/mediana/migliore, % in perdita.
+- **💶 PAC**: backtest dei versamenti periodici vs investimento unico.
+- **🎯 Obiettivo**: versamento mensile per una cifra-obiettivo, con scenari
+  Monte Carlo (pessimista/medio/ottimista) e probabilità di successo.
+- **💰 Costi e tasse**: TER e aliquota (26% / 12,5%) per asset → impatto a
+  10/20 anni su valore lordo, costo del TER, tasse (incl. bollo 0,2%), netto.
+- **♻️ Ribilanciamento**: buy & hold vs ribilanciamento (annuale o a soglia).
+- **📊 Statistica**: prezzo vs media (caro/economico), RSI, vantaggio statistico.
+- **🧮 Ottimizzazione**: **minima varianza**, **risk parity**, **massimo Sharpe**,
+  **massimo rendimento** — con **quota minima** e **cap massimo** per asset,
+  frontiera efficiente e avvisi sui limiti dei metodi backward-looking.
+- **🆚 Confronto** con singoli ETF/indici e **portafogli famosi** (60/40, All
+  Weather, Golden Butterfly, Permanent Portfolio).
 
-### 📈 Analisi tecnica (per singolo asset)
+### 📈 Analisi tecnica (qualsiasi asset)
+- Analizza **un asset del portafoglio** oppure **cercane uno qualsiasi** (anche
+  fuori portafoglio), con pulsante per aggiungerlo al portafoglio.
 - Grafico a **candele** (OHLC), **volumi**, **medie mobili** SMA/EMA con periodi
-  a scelta, **RSI** con periodo regolabile, strumenti per **disegnare
-  linee/trendline**.
-- **Statistiche** dell'asset e **indicatori** (caro/economico, RSI, vantaggio
-  statistico) sull'intervallo selezionato (YTD / 1A / 3A / 5A / 10A / max).
-- I prezzi usano la **valuta nativa** dell'asset (standard per le candele).
+  a scelta, **RSI** regolabile, strumenti per **disegnare linee/trendline**.
+- **Statistiche** e **indicatori** (caro/economico, RSI, vantaggio statistico)
+  sull'intervallo selezionato (YTD / 1A / 3A / 5A / 10A / max).
 
 ### Trasversali
-- **Salva/carica** un portafoglio in formato JSON.
-- **Conversione valutaria** opzionale: prezzi convertiti nella valuta base
-  (default EUR) coi tassi di cambio di yfinance, *prima* di calcolare i rendimenti.
-- Auto-reload locale (`.streamlit/config.toml`, `runOnSave`).
+- **Orizzonte d'investimento** (sidebar) usato da riepilogo e proiezione.
+- **📖 Glossario** delle metriche + tooltip ovunque; **controlli di qualità**
+  sui dati (storico breve, buchi, anomalie).
+- **Conversione valutaria** opzionale (default EUR), con gestione corretta delle
+  valute in **sottounità** (es. penny `GBp` → GBP ÷100).
+- **Salva/carica** portafoglio (JSON); auto-reload locale (`runOnSave`).
 
 ## Struttura del progetto
 

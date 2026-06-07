@@ -19,7 +19,11 @@ import streamlit as st
 
 import common as cm
 
-st.set_page_config(page_title="Sharpe — Analisi ETF & Portafoglio", layout="wide")
+st.set_page_config(
+    page_title="Sharpe — Analisi ETF & Portafoglio",
+    layout="wide",
+    initial_sidebar_state="auto",  # su schermi piccoli la barra laterale si chiude da sola
+)
 
 # Stato condiviso (portafoglio di esempio, composizione) e parametri comuni.
 cm.init_state()

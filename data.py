@@ -97,21 +97,46 @@ def _serie_close(tk: yf.Ticker, period: str | None, start, end) -> pd.Series:
 
 
 def _valuta_nativa(tk: yf.Ticker) -> str | None:
-    """Ricava la valuta di quotazione del ticker (con doppio fallback)."""
-    # fast_info è più rapido e affidabile; info è il fallback.
+    """Ricava la valuta di quotazione del ticker (con doppio fallback).
+
+    Restituisce il codice **grezzo** (senza forzare le maiuscole), perché le
+    valute in sottounità — es. ``GBp`` (penny) — si distinguono solo dalla
+    minuscola: la normalizzazione avviene in :func:`_normalizza_valuta`.
+    """
     try:
         cur = tk.fast_info.get("currency")
         if cur:
-            return str(cur).upper()
+            return str(cur)
     except Exception:
         pass
     try:
         cur = tk.info.get("currency")
         if cur:
-            return str(cur).upper()
+            return str(cur)
     except Exception:
         pass
     return None
+
+
+def _normalizza_valuta(cur: str | None) -> tuple[str | None, float]:
+    """Mappa una valuta (anche in sottounità) a ``(valuta_maggiore, divisore)``.
+
+    Alcune borse quotano in **sottounità** (centesimi): es. ``GBp``/``GBX`` =
+    penny britannici (1/100 di GBP), ``ZAc`` = centesimi di rand, ``ILA`` =
+    agorot (1/100 di ILS). In questi casi i prezzi vanno **divisi per 100** e
+    ricondotti alla valuta maggiore (per costruire correttamente la coppia di
+    cambio). Le valute normali restituiscono ``(CUR, 1.0)``.
+    """
+    if not cur:
+        return None, 1.0
+    c = str(cur).strip()
+    if c in ("GBp", "GBX", "GBx"):
+        return "GBP", 100.0
+    if c in ("ZAc", "ZAX"):
+        return "ZAR", 100.0
+    if c in ("ILA", "ILa"):
+        return "ILS", 100.0
+    return c.upper(), 1.0
 
 
 def scarica_prezzi(
@@ -150,10 +175,12 @@ def scarica_prezzi(
             if serie.empty:
                 errori[t] = "Nessun dato disponibile (ticker inesistente o intervallo vuoto)."
                 continue
+            cur_major, divisore = _normalizza_valuta(_valuta_nativa(tk))
+            if divisore != 1.0:
+                serie = serie / divisore  # da sottounità (es. penny) a valuta maggiore
             series[t] = serie
-            cur = _valuta_nativa(tk)
-            if cur:
-                valute[t] = cur
+            if cur_major:
+                valute[t] = cur_major
         except Exception as exc:  # rete, ticker malformato, ecc.
             errori[t] = f"Errore nel download: {exc}"
 
@@ -165,6 +192,40 @@ def scarica_prezzi(
     prezzi = allinea_prezzi(prezzi)
 
     return RisultatoDownload(prezzi=prezzi, valute=valute, errori=errori)
+
+
+def controlla_qualita(prezzi: pd.DataFrame) -> list[tuple[str, str]]:
+    """Controlli di qualità sui dati scaricati (storico, buchi, anomalie).
+
+    Restituisce una lista di ``(livello, messaggio)`` con ``livello`` ∈
+    {"warning", "info"}, da mostrare nell'interfaccia senza bloccare l'analisi.
+    """
+    avvisi: list[tuple[str, str]] = []
+    if prezzi is None or prezzi.empty:
+        return avvisi
+
+    anni = (prezzi.index.max() - prezzi.index.min()).days / 365.25
+    if anni < 1.0:
+        avvisi.append(("warning",
+            f"Storico molto breve (~{anni:.1f} anni): le metriche annualizzate sono poco affidabili."))
+
+    # Buchi: intervalli > 7 giorni tra due quotazioni consecutive.
+    giorni = prezzi.index.to_series().diff().dt.days
+    n_buchi = int((giorni > 7).sum())
+    if n_buchi > 0:
+        avvisi.append(("info",
+            f"{n_buchi} interruzione/i nei dati (oltre 7 giorni senza quotazioni): "
+            "potrebbero esserci festività lunghe o dati mancanti."))
+
+    # Anomalie: variazioni giornaliere estreme (possibili errori della fonte).
+    rend = prezzi.pct_change()
+    n_anomalie = int((rend.abs() > 0.40).to_numpy().sum())
+    if n_anomalie > 0:
+        avvisi.append(("warning",
+            f"{n_anomalie} variazione/i giornaliera/e anomala/e (oltre ±40%): "
+            "possibili errori nei dati di Yahoo Finance, controlla i risultati."))
+
+    return avvisi
 
 
 def allinea_prezzi(prezzi: pd.DataFrame) -> pd.DataFrame:
