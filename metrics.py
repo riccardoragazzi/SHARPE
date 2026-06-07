@@ -952,16 +952,17 @@ def valutazione_prezzo(prezzo: pd.Series, finestra: int = 200) -> dict:
     premio = prezzo_corr / media - 1.0 if media else np.nan
     z = (prezzo_corr - media) / sd if sd and sd > 0 else np.nan
 
+    # Etichette NEUTRE (descrivono la posizione vs media, senza suggerire azioni).
     if np.isnan(z):
         g, gb = "Indeterminato", "—"
     elif z > 2:
-        g, gb = "Molto sopra la media storica (caro)", "Molto caro"
+        g, gb = "Molto sopra la media storica", "Molto sopra la media"
     elif z > 1:
-        g, gb = "Sopra la media storica (caro)", "Caro"
+        g, gb = "Sopra la media storica", "Sopra la media"
     elif z < -2:
-        g, gb = "Molto sotto la media storica (economico)", "Molto economico"
+        g, gb = "Molto sotto la media storica", "Molto sotto la media"
     elif z < -1:
-        g, gb = "Sotto la media storica (economico)", "Economico"
+        g, gb = "Sotto la media storica", "Sotto la media"
     else:
         g, gb = "In linea con la media storica", "In linea"
 

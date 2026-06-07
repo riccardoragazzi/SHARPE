@@ -35,6 +35,9 @@ st.caption(
     "Finance e possono contenere errori o ritardi."
 )
 
+# Mini guida iniziale (espansa solo la prima volta).
+cm.mostra_onboarding()
+
 # Indicatore GENERALE di mercato (risk-on / risk-off), indipendente dal portafoglio.
 cm.mostra_semaforo_mercato()
 

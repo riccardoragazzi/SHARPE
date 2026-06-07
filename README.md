@@ -206,6 +206,11 @@ da un repository GitHub: il file principale è `app.py`. Ad ogni `commit` sul
 repo l'app online si ricostruisce automaticamente. Consigliata la versione di
 **Python 3.13** nelle impostazioni dell'app.
 
+**Tenere l'app «sveglia»**: sul piano gratuito l'app va in standby dopo un po' di
+inattività e al primo accesso impiega ~40s a riavviarsi. Per ridurre l'attesa si
+può configurare un **ping periodico** (es. [UptimeRobot](https://uptimerobot.com)
+gratuito) che chiama l'URL dell'app ogni 5–10 minuti, così resta attiva.
+
 ## Limiti noti
 
 - La disponibilità e la qualità dei dati dipendono da Yahoo Finance (possibili

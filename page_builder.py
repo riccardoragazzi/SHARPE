@@ -108,7 +108,7 @@ pesi_input = pd.Series([pesi_correnti[t] for t in tickers], index=tickers)
 # Download dati e calcoli
 # ---------------------------------------------------------------------------
 
-with st.spinner("Scarico i dati da Yahoo Finance..."):
+with st.spinner("⏳ Scarico i dati di mercato (può richiedere qualche secondo la prima volta)..."):
     ris = cm.carica_dati(
         tuple(tickers), ss.period, ss.data_inizio, ss.data_fine, ss.valuta_base, ss.converti
     )
@@ -214,6 +214,13 @@ with tab_pf:
               help="Guadagno totale nel periodo analizzato.")
     c7.metric("Volatilità (serie)", f"{met_pf['Volatilità annua (serie)']:.2%}",
               help="Volatilità calcolata sui rendimenti del portafoglio (di norma uguale a quella da covarianza).")
+    _infl = ss.get("inflazione", 0.0)
+    if _infl > 0 and not pd.isna(met_pf["Rend. annuo (CAGR)"]):
+        cagr_reale = (1 + met_pf["Rend. annuo (CAGR)"]) / (1 + _infl) - 1
+        st.caption(
+            f"Rendimento **reale** (al netto di un'inflazione del {_infl:.1%}/anno): "
+            f"**{cagr_reale:.2%}/anno** — la crescita effettiva del potere d'acquisto."
+        )
 
     st.subheader("Portafoglio vs singoli asset (base 100)")
     serie_pf = mtr.serie_rendimenti_portafoglio(rendimenti, pesi)
@@ -559,8 +566,13 @@ with tab_obiettivo:
         serie_pf_obj = mtr.serie_rendimenti_portafoglio(mtr.rendimenti_giornalieri(ris_obj.prezzi), pesi)
         mu = mtr.cagr(serie_pf_obj)
         sigma = mtr.volatilita_annua(serie_pf_obj)
-        st.caption(f"Ipotesi dal tuo portafoglio: rendimento storico **{mu:.1%}/anno**, volatilità **{sigma:.1%}**.")
-        proj = mtr.proiezione_obiettivo(mu, sigma, obiettivo_eur, orizzonte, prob_perc / 100.0)
+        reali = bool(ss.get("reali"))
+        mu_use = ((1 + mu) / (1 + ss.get("inflazione", 0.0)) - 1) if reali else mu
+        nota_infl = (f" → **reale {mu_use:.1%}/anno** (tolta inflazione {ss.get('inflazione', 0.0):.1%})") if reali else ""
+        st.caption(f"Ipotesi dal tuo portafoglio: rendimento storico **{mu:.1%}/anno**, volatilità **{sigma:.1%}**{nota_infl}.")
+        if reali:
+            st.info("📉 Importi mostrati in **€ di oggi** (al netto dell'inflazione): è il potere d'acquisto reale.")
+        proj = mtr.proiezione_obiettivo(mu_use, sigma, obiettivo_eur, orizzonte, prob_perc / 100.0)
         if proj is None:
             st.warning("Parametri non validi.")
         else:

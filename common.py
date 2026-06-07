@@ -340,6 +340,16 @@ def sidebar_parametri():
         help="Per quanti anni pensi di tenere l'investimento. Usato nel riepilogo automatico "
              "e nella proiezione a obiettivo. Più è lungo, più le oscillazioni di breve contano poco.",
     )
+    infl_perc = st.sidebar.number_input(
+        "Inflazione annua attesa (%)", value=2.0, min_value=0.0, max_value=15.0, step=0.5, format="%.1f",
+        key="infl_perc",
+        help="Quanto crescono i prezzi ogni anno. Serve per i «valori reali» (potere d'acquisto).",
+    )
+    reali = st.sidebar.checkbox(
+        "Ragiona al netto dell'inflazione (valori reali)", value=False, key="reali",
+        help="Se attivo, rendimenti e proiezioni sono espressi in **€ di oggi** (tolta l'inflazione): "
+             "più realistico su 10–20 anni.",
+    )
     valuta_base = st.sidebar.selectbox("Valuta base", VALUTE_COMUNI, index=0, key="valuta")
     converti = st.sidebar.checkbox(f"Converti tutto in {valuta_base}", value=True, key="conv")
 
@@ -366,6 +376,8 @@ def sidebar_parametri():
     ss.data_inizio = pd.Timestamp(data_inizio) if data_inizio else None
     ss.data_fine = pd.Timestamp(data_fine) if data_fine else None
     ss.risk_free = rf_perc / 100.0
+    ss.inflazione = infl_perc / 100.0
+    # ss.reali è già impostato dal widget (key="reali"): non va riassegnato.
     ss.valuta_base = valuta_base
     ss.converti = converti
 
@@ -401,6 +413,24 @@ def composizione_effettiva(tickers) -> dict:
             if nota:
                 out[t] = nota
     return out
+
+
+def mostra_onboarding():
+    """Mini guida «come si usa in 3 passi» (espansa solo la prima volta)."""
+    espandi = not ss.get("onboarding_visto", False)
+    with st.expander("👋 Come si usa in 3 passi", expanded=espandi):
+        st.markdown(
+            "1. **Costruisci il portafoglio** (pagina 🧱 *Builder*): cerca ETF per nome / ticker / ISIN "
+            "oppure carica un **portafoglio pronto**, poi regola i pesi.\n"
+            "2. **Leggi le analisi**: rischio e diversificazione (paesi/settori), e i piani — "
+            "**💶 PAC** (versamenti periodici) e **🎯 Obiettivo** (quanto versare per una cifra).\n"
+            "3. **Approfondisci un singolo asset** nella pagina **📈 Analisi tecnica** "
+            "(anche asset non in portafoglio).\n\n"
+            "Nella **barra laterale** imposti periodo, orizzonte, valuta e inflazione. "
+            "📱 Da telefono: apri il menu in alto a sinistra e scorri le schede in orizzontale. "
+            "Tutto è a scopo **didattico**, non è consulenza finanziaria."
+        )
+        ss.onboarding_visto = True
 
 
 def mostra_glossario():
