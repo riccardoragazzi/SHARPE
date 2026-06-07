@@ -24,24 +24,71 @@ ss = st.session_state
 
 st.header("📈 Analisi tecnica per asset")
 
+
+def _cerca_analisi():
+    """Ricerca un asset qualsiasi (per la pagina Analisi)."""
+    ss.risultati_analisi = cm.cerca(ss.get("query_analisi", ""))
+
+
+def _scegli_analisi(symbol, nome):
+    """Imposta l'asset cercato come asset da analizzare."""
+    ss.analisi_ticker = symbol
+    ss.analisi_nome = nome
+
+
+# ---------------------------------------------------------------------------
+# Scelta dell'asset: dal portafoglio oppure cercandone uno qualsiasi
+# ---------------------------------------------------------------------------
+
 sel = cm.portafoglio_pulito()
-if sel.empty:
-    st.info("Nessun asset nel portafoglio. Vai alla pagina **Builder** e aggiungine almeno uno.")
-    st.stop()
-
-# ---------------------------------------------------------------------------
-# Controlli: asset, intervallo, indicatori
-# ---------------------------------------------------------------------------
-
-nomi = dict(zip(sel["Ticker"], sel["Nome"]))
-ticker = st.selectbox(
-    "Asset",
-    options=sel["Ticker"].tolist(),
-    format_func=lambda t: f"{nomi.get(t, t)}  ({t})",
+modo = st.radio(
+    "Asset da analizzare", ["Da portafoglio", "Cerca un asset"], horizontal=True,
+    help="«Da portafoglio»: scegli tra gli asset che hai inserito. «Cerca un asset»: "
+         "analizza QUALSIASI ETF/indice/azione, anche se non è nel tuo portafoglio.",
 )
 
+ticker, nome_asset = None, None
+if modo == "Da portafoglio":
+    if sel.empty:
+        st.info("Nessun asset nel portafoglio. Usa **«Cerca un asset»** qui sopra, "
+                "oppure aggiungine nel **Builder**.")
+        st.stop()
+    nomi_pf = dict(zip(sel["Ticker"], sel["Nome"]))
+    ticker = st.selectbox("Asset", options=sel["Ticker"].tolist(),
+                          format_func=lambda t: f"{nomi_pf.get(t, t)}  ({t})")
+    nome_asset = nomi_pf.get(ticker, ticker)
+else:
+    cca, ccb = st.columns([6, 1])
+    cca.text_input(
+        "Cerca asset", key="query_analisi", label_visibility="collapsed",
+        placeholder="Cerca per nome, ticker o ISIN (es. MSCI World, AAPL, IE00B4L5Y983)...",
+    )
+    ccb.button("Cerca", key="btn_cerca_analisi", on_click=_cerca_analisi, width="stretch")
+    if ss.get("risultati_analisi"):
+        st.caption("Risultati — «📈 Analizza» per vederne l'analisi, «➕» per aggiungerlo al portafoglio:")
+        for r in ss.risultati_analisi:
+            rc1, rc2, rc3 = st.columns([5, 1, 1])
+            rc1.markdown(f"**{r['nome']}**  \n`{r['symbol']}` · {r['tipo'] or 'n/d'} · {r['borsa'] or 'n/d'}")
+            rc2.button("📈 Analizza", key=f"an_{r['symbol']}", on_click=_scegli_analisi,
+                       args=(r["symbol"], r["nome"]), width="stretch")
+            gia = r["symbol"] in ss.selezionati["Ticker"].values
+            rc3.button("✓" if gia else "➕", key=f"addan_{r['symbol']}", disabled=gia,
+                       on_click=cm.cb_aggiungi, args=(r["symbol"], r["nome"]), width="stretch",
+                       help="Aggiungi questo asset al portafoglio")
+    ticker = ss.get("analisi_ticker")
+    nome_asset = ss.get("analisi_nome") or ticker
+    if not ticker:
+        st.info("Cerca un asset qui sopra e premi **📈 Analizza** per vederne l'analisi completa.")
+        st.stop()
+    st.success(f"Asset in analisi: **{nome_asset}**  (`{ticker}`)")
+
+# ---------------------------------------------------------------------------
+# Controlli: intervallo, indicatori
+# ---------------------------------------------------------------------------
+
 intervallo = st.radio(
-    "Intervallo", ["YTD", "1A", "3A", "5A", "10A", "max"], index=3, horizontal=True
+    "Intervallo", ["YTD", "1A", "3A", "5A", "10A", "max"], index=3, horizontal=True,
+    help="Quanto storico mostrare nel grafico. YTD = da inizio anno; max = tutto lo storico.",
 )
 
 
@@ -79,7 +126,7 @@ with st.spinner("Scarico i dati..."):
     full = cm.ohlcv(ticker, period="max")
 
 if full.empty or "Close" not in full.columns:
-    st.error(f"Dati non disponibili per **{nomi.get(ticker, ticker)}** ({ticker}).")
+    st.error(f"Dati non disponibili per **{nome_asset}** ({ticker}).")
     st.stop()
 
 close_full = full["Close"]
@@ -117,7 +164,7 @@ if df.empty:
 
 rend = df["Close"].pct_change().dropna()
 risk_free = ss.risk_free
-st.subheader(f"Statistiche · {nomi.get(ticker, ticker)} · {intervallo}")
+st.subheader(f"Statistiche · {nome_asset} · {intervallo}")
 m1, m2, m3, m4, m5, m6 = st.columns(6)
 m1.metric("Rend. cumulato", f"{mtr.rendimento_cumulato(rend):.2%}")
 m2.metric("Rend. annuo (CAGR)", f"{mtr.cagr(rend):.2%}")

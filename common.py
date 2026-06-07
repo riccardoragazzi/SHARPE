@@ -274,7 +274,16 @@ def sidebar_parametri():
         data_fine = st.sidebar.date_input("Data fine", oggi, key="d_fine")
 
     st.sidebar.subheader("Altri parametri")
-    rf_perc = st.sidebar.number_input("Tasso risk-free annuo (%)", value=3.0, step=0.25, format="%.2f", key="rf")
+    rf_perc = st.sidebar.number_input(
+        "Tasso risk-free annuo (%)", value=3.0, step=0.25, format="%.2f", key="rf",
+        help="Rendimento di un investimento «senza rischio» (es. titoli di Stato a breve). "
+             "Serve per calcolare Sharpe e Sortino.",
+    )
+    orizzonte = st.sidebar.number_input(
+        "Orizzonte d'investimento (anni)", value=10, min_value=1, max_value=40, step=1, key="orizzonte",
+        help="Per quanti anni pensi di tenere l'investimento. Usato nel riepilogo automatico "
+             "e nella proiezione a obiettivo. Più è lungo, più le oscillazioni di breve contano poco.",
+    )
     valuta_base = st.sidebar.selectbox("Valuta base", VALUTE_COMUNI, index=0, key="valuta")
     converti = st.sidebar.checkbox(f"Converti tutto in {valuta_base}", value=True, key="conv")
 

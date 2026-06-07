@@ -315,6 +315,165 @@ def rolling_rendimenti_annualizzati(serie_rendimenti: pd.Series, anni: int) -> p
 
 
 # ---------------------------------------------------------------------------
+# Pianificazione: PAC/DCA, proiezione a obiettivo, riepilogo automatico
+# ---------------------------------------------------------------------------
+
+def simula_pac(serie_rendimenti: pd.Series, importo: float = 100.0, frequenza_mesi: int = 1) -> dict | None:
+    """Backtest storico di un PAC (versamenti periodici) vs investimento unico.
+
+    Simula, sui dati reali del portafoglio, di versare ``importo`` ogni
+    ``frequenza_mesi`` mesi (acquistando "quote" al prezzo di quel giorno) e lo
+    confronta con un investimento unico iniziale dello stesso capitale totale.
+    Restituisce un dizionario con i totali e le serie temporali per il grafico.
+    """
+    r = serie_rendimenti.dropna()
+    if len(r) < 2:
+        return None
+    W = (1.0 + r).cumprod()              # indice di ricchezza (1 unità che cresce)
+    idx = W.index
+
+    # Prima seduta di ciascun mese, poi una ogni "frequenza_mesi" mesi.
+    periodi = idx.to_period("M")
+    primi = pd.Series(idx, index=periodi)
+    primi = primi[~primi.index.duplicated(keep="first")]
+    date_vers = pd.DatetimeIndex(primi.values[:: max(1, int(frequenza_mesi))])
+
+    contrib = pd.Series(0.0, index=idx)
+    contrib.loc[date_vers] = float(importo)
+    quote_cum = (contrib / W).cumsum()   # quote accumulate giorno per giorno
+    valore_pac = quote_cum * W
+    versato = contrib.cumsum()
+    tot_versato = float(versato.iloc[-1])
+
+    # Investimento unico (lump sum): tutto il capitale finale versato, all'inizio.
+    valore_lump = tot_versato * (W / W.iloc[0])
+
+    serie = pd.DataFrame({
+        "PAC": valore_pac,
+        "Capitale versato": versato,
+        "Investimento unico": valore_lump,
+    })
+    return {
+        "n_versamenti": int((contrib > 0).sum()),
+        "versato": tot_versato,
+        "valore_finale": float(valore_pac.iloc[-1]),
+        "guadagno_pct": float(valore_pac.iloc[-1] / tot_versato - 1.0) if tot_versato else np.nan,
+        "lump_finale": float(valore_lump.iloc[-1]),
+        "lump_guadagno_pct": float(valore_lump.iloc[-1] / tot_versato - 1.0) if tot_versato else np.nan,
+        "serie": serie,
+    }
+
+
+def proiezione_obiettivo(
+    mu_annuo: float, sigma_annuo: float, obiettivo: float, anni: int,
+    n_sim: int = 1500, seed: int = 0,
+) -> dict | None:
+    """Proiezione FUTURA: versamento mensile per raggiungere un obiettivo.
+
+    Calcola il versamento mensile (PMT) necessario per arrivare a ``obiettivo``
+    euro tra ``anni`` anni, usando il rendimento atteso ``mu_annuo`` (scenario
+    mediano). Poi, con quel PMT, fa una **simulazione Monte Carlo** (rendimenti
+    mensili ~Normale) e riporta gli scenari pessimista/medio/ottimista
+    (percentili 10/50/90) e la probabilità di centrare l'obiettivo.
+    """
+    n = int(anni * 12)
+    if n <= 0:
+        return None
+    r_m = (1.0 + mu_annuo) ** (1.0 / 12.0) - 1.0     # rendimento mensile mediano
+    if abs(r_m) < 1e-9:
+        pmt = obiettivo / n
+    else:
+        pmt = obiettivo * r_m / ((1.0 + r_m) ** n - 1.0)
+
+    rng = np.random.default_rng(seed)
+    sig_m = sigma_annuo / np.sqrt(12.0)
+    rendimenti = rng.normal(r_m, sig_m, size=(n_sim, n))
+
+    val = np.zeros(n_sim)
+    storia = np.empty((3, n))  # percentili 10/50/90 nel tempo
+    for t in range(n):
+        val = (val + pmt) * (1.0 + rendimenti[:, t])
+        storia[:, t] = np.percentile(val, [10, 50, 90])
+
+    bande = pd.DataFrame(
+        {"Pessimista (10%)": storia[0], "Medio (50%)": storia[1], "Ottimista (90%)": storia[2],
+         "Capitale versato": pmt * np.arange(1, n + 1)},
+        index=np.arange(1, n + 1),
+    )
+    return {
+        "pmt_mensile": float(pmt),
+        "totale_versato": float(pmt * n),
+        "pessimista": float(storia[0, -1]),
+        "medio": float(storia[1, -1]),
+        "ottimista": float(storia[2, -1]),
+        "prob_obiettivo": float((val >= obiettivo).mean()),
+        "bande": bande,
+    }
+
+
+def riepilogo_portafoglio(rendimenti: pd.DataFrame, pesi: pd.Series, orizzonte: int, risk_free: float = 0.0) -> dict:
+    """Riepilogo automatico (testo in italiano semplice) del portafoglio.
+
+    Classifica **diversificazione** (n. asset + correlazione media + concentrazione
+    del contributo al rischio), **rischio** (volatilità annua) e **coerenza con
+    l'orizzonte**. È una descrizione didattica, NON una raccomandazione.
+    """
+    colonne = list(rendimenti.columns)
+    n_asset = len(colonne)
+    met = metriche_portafoglio(rendimenti, pesi, risk_free)
+    vol = met["Volatilità annua (covarianza)"]
+
+    if np.isnan(vol):
+        rischio = "indeterminato"
+    elif vol < 0.08:
+        rischio = "basso"
+    elif vol < 0.15:
+        rischio = "medio"
+    else:
+        rischio = "alto"
+
+    corr = matrice_correlazione(rendimenti)
+    if n_asset >= 2:
+        m = corr.values
+        iu = np.triu_indices_from(m, k=1)
+        corr_media = float(np.nanmean(m[iu]))
+    else:
+        corr_media = np.nan
+    rc = contributo_rischio(rendimenti, pesi)["Contributo %"]
+    conc = float(rc.max()) if len(rc) else 1.0
+
+    if n_asset <= 1:
+        diversificazione = "nulla (un solo asset)"
+    elif n_asset >= 4 and (np.isnan(corr_media) or corr_media < 0.6) and conc < 0.6:
+        diversificazione = "buona"
+    elif n_asset >= 2 and conc < 0.8:
+        diversificazione = "media"
+    else:
+        diversificazione = "scarsa"
+
+    if rischio == "alto" and orizzonte < 5:
+        coerenza = (f"il rischio è **alto** rispetto a un orizzonte di {orizzonte} anni: "
+                    "su orizzonti brevi le oscillazioni pesano di più")
+    elif rischio == "basso" and orizzonte >= 10:
+        coerenza = (f"profilo **prudente** per un orizzonte lungo ({orizzonte} anni): "
+                    "meno oscillazioni, ma anche rendimenti attesi più contenuti")
+    else:
+        coerenza = f"rischio nel complesso **coerente** con un orizzonte di {orizzonte} anni"
+
+    buono = (rischio != "alto" or orizzonte >= 7) and diversificazione in ("buona", "media")
+    livello = "success" if buono else "warning"
+    testo = (
+        f"Portafoglio con **{n_asset} asset**, diversificazione **{diversificazione}** e "
+        f"rischio **{rischio}** (volatilità annua {vol:.1%}). In sintesi: {coerenza}."
+    )
+    return {
+        "testo": testo, "livello": livello, "rischio": rischio,
+        "diversificazione": diversificazione, "vol": vol,
+        "corr_media": corr_media, "concentrazione": conc,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Allocazione paese / settore
 # ---------------------------------------------------------------------------
 

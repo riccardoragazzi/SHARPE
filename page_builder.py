@@ -124,12 +124,32 @@ if ris.valute:
     st.caption(f"Valute native rilevate — {valute_txt}")
 
 # ---------------------------------------------------------------------------
+# Riepilogo automatico (in italiano semplice)
+# ---------------------------------------------------------------------------
+
+orizzonte = int(ss.get("orizzonte", 10))
+riep = mtr.riepilogo_portafoglio(rendimenti, pesi, orizzonte, risk_free)
+_box = {"success": st.success, "warning": st.warning}.get(riep["livello"], st.info)
+_box("🧭 " + riep["testo"])
+with st.expander("Come leggo questo riepilogo?"):
+    st.markdown(
+        "- **Diversificazione**: quanto i tuoi asset sono diversi tra loro (più alta = meno "
+        "dipendi da un singolo mercato). Tiene conto di numero di asset, correlazione media e "
+        "concentrazione del rischio.\n"
+        "- **Rischio**: basato sulla **volatilità annua** (quanto oscilla il valore): "
+        "sotto 8% basso, 8–15% medio, oltre 15% alto.\n"
+        "- **Orizzonte**: impostalo nella barra laterale; più è lungo, più puoi assorbire le "
+        "oscillazioni di breve periodo.\n\n"
+        "_È una descrizione statistica/didattica, non un consiglio di investimento._"
+    )
+
+# ---------------------------------------------------------------------------
 # Tab di analisi del portafoglio
 # ---------------------------------------------------------------------------
 
-tab_asset, tab_pf, tab_alloc, tab_timing, tab_stat, tab_opt, tab_conf = st.tabs(
-    ["📈 Singoli asset", "💼 Portafoglio", "🌍 Allocazione", "⏱️ Timing", "📊 Statistica",
-     "🧮 Ottimizzazione", "🆚 Confronto"]
+tab_asset, tab_pf, tab_alloc, tab_timing, tab_pac, tab_obiettivo, tab_stat, tab_opt, tab_conf = st.tabs(
+    ["📈 Singoli asset", "💼 Portafoglio", "🌍 Allocazione", "⏱️ Timing", "💶 PAC", "🎯 Obiettivo",
+     "📊 Statistica", "🧮 Ottimizzazione", "🆚 Confronto"]
 )
 
 # === Singoli asset =========================================================
@@ -296,11 +316,7 @@ with tab_timing:
         "disponibile (non l'intervallo nella barra laterale)."
     )
 
-    FINESTRE = {"1 anno": 1, "3 anni": 3, "5 anni": 5, "10 anni": 10}
-    scelta_fin = st.radio("Finestra di investimento", list(FINESTRE.keys()), index=2, horizontal=True)
-    anni_fin = FINESTRE[scelta_fin]
-
-    # Scarica tutto lo storico comune disponibile per il portafoglio.
+    # Scarica tutto lo storico comune disponibile per il portafoglio (cache).
     with st.spinner("Calcolo i rendimenti su tutto lo storico..."):
         ris_max = cm.carica_dati(tuple(tickers_ok), "max", None, None, ss.valuta_base, ss.converti)
 
@@ -309,24 +325,35 @@ with tab_timing:
     else:
         rend_max = mtr.rendimenti_giornalieri(ris_max.prezzi)
         serie_pf_max = mtr.serie_rendimenti_portafoglio(rend_max, pesi)
-        roll = mtr.rolling_rendimenti_annualizzati(serie_pf_max, anni_fin)
-
         anni_storico = (ris_max.prezzi.index.max() - ris_max.prezzi.index.min()).days / 365.25
+
+        FINESTRE = {"1 anno": 1, "3 anni": 3, "5 anni": 5, "10 anni": 10,
+                    "15 anni": 15, "20 anni": 20, "Massima": None}
+        scelta_fin = st.radio(
+            "Finestra di investimento", list(FINESTRE.keys()), index=2, horizontal=True,
+            help="Per quanti anni tieni l'investimento dopo averlo iniziato. «Massima» = la "
+                 "finestra più lunga possibile con lo storico disponibile.",
+        )
+        anni_fin = FINESTRE[scelta_fin]
+        if anni_fin is None:  # "Massima"
+            anni_fin = max(1, int(anni_storico) - 1)
+
+        roll = mtr.rolling_rendimenti_annualizzati(serie_pf_max, anni_fin)
         if roll.empty:
             st.warning(
                 f"Storico insufficiente: servono più di **{anni_fin} anni** di dati comuni a tutti "
-                f"gli asset, ma ne risultano circa **{anni_storico:.1f}**. Prova una finestra più corta "
-                "(es. 1 o 3 anni) o asset con storia più lunga."
+                f"gli asset, ma ne risultano circa **{anni_storico:.1f}**. Prova una finestra più corta."
             )
         else:
             # Statistiche di sintesi.
             peggiore, mediana, migliore = roll.min(), roll.median(), roll.max()
-            quota_pos = (roll > 0).mean()
-            s1, s2, s3, s4 = st.columns(4)
-            s1.metric("Peggiore", f"{peggiore:.2%}/anno")
-            s2.metric("Mediana", f"{mediana:.2%}/anno")
-            s3.metric("Migliore", f"{migliore:.2%}/anno")
-            s4.metric("Finestre positive", f"{quota_pos:.0%}", help="Quota di giorni di partenza che hanno dato un rendimento > 0.")
+            quota_pos = float((roll > 0).mean())
+            s1, s2, s3, s4, s5 = st.columns(5)
+            s1.metric("Peggiore", f"{peggiore:.2%}/anno", help="Il risultato peggiore tra tutti i giorni di partenza possibili.")
+            s2.metric("Mediana", f"{mediana:.2%}/anno", help="Il valore centrale: metà dei casi è sopra, metà sotto.")
+            s3.metric("Migliore", f"{migliore:.2%}/anno", help="Il risultato migliore tra tutti i giorni di partenza possibili.")
+            s4.metric("Finestre positive", f"{quota_pos:.0%}", help="Quota di giorni di partenza che hanno chiuso in guadagno.")
+            s5.metric("Finestre in perdita", f"{1 - quota_pos:.0%}", help="Quota di giorni di partenza che hanno chiuso in perdita.")
 
             fig_roll = go.Figure()
             fig_roll.add_trace(go.Scatter(
@@ -345,6 +372,101 @@ with tab_timing:
                 f"{len(roll)} possibili giorni di partenza analizzati su ~{anni_storico:.1f} anni di storico. "
                 "⚠️ I rendimenti passati non garantiscono quelli futuri."
             )
+
+# === PAC / DCA (backtest storico) =========================================
+with tab_pac:
+    st.subheader("Simulatore PAC (versamenti periodici) — backtest storico")
+    st.caption(
+        "Simula di aver investito una cifra fissa a intervalli regolari **nel passato**, sui dati "
+        "reali del tuo portafoglio, e la confronta con un investimento unico iniziale dello stesso "
+        "totale. Usa tutto lo storico disponibile."
+    )
+    cpac1, cpac2 = st.columns(2)
+    importo_pac = cpac1.number_input(
+        "Importo per versamento (€)", min_value=10.0, value=100.0, step=10.0,
+        help="Quanto versi ogni volta (es. ogni mese).",
+    )
+    freq_label = cpac2.selectbox(
+        "Frequenza versamenti", ["Mensile", "Bimestrale", "Trimestrale", "Semestrale", "Annuale"],
+        help="Ogni quanto tempo versi l'importo indicato.",
+    )
+    freq_map = {"Mensile": 1, "Bimestrale": 2, "Trimestrale": 3, "Semestrale": 6, "Annuale": 12}
+
+    with st.spinner("Calcolo il PAC su tutto lo storico..."):
+        ris_pac = cm.carica_dati(tuple(tickers_ok), "max", None, None, ss.valuta_base, ss.converti)
+    if ris_pac.prezzi.empty:
+        st.warning("Storico non disponibile per il calcolo.")
+    else:
+        serie_pf_pac = mtr.serie_rendimenti_portafoglio(mtr.rendimenti_giornalieri(ris_pac.prezzi), pesi)
+        res_pac = mtr.simula_pac(serie_pf_pac, importo_pac, freq_map[freq_label])
+        if res_pac is None:
+            st.warning("Dati insufficienti per la simulazione.")
+        else:
+            val = ss.valuta_base if ss.converti else ""
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Capitale versato", f"{res_pac['versato']:,.0f} {val}",
+                      help="La somma di tutti i tuoi versamenti.")
+            m2.metric("Valore finale (PAC)", f"{res_pac['valore_finale']:,.0f} {val}",
+                      f"{res_pac['guadagno_pct']:+.1%}", help="Quanto varrebbe oggi il PAC, e il guadagno %.")
+            m3.metric("Investimento unico", f"{res_pac['lump_finale']:,.0f} {val}",
+                      f"{res_pac['lump_guadagno_pct']:+.1%}",
+                      help="Se avessi investito tutto il capitale finale all'inizio, in un colpo solo.")
+            m4.metric("N. versamenti", f"{res_pac['n_versamenti']}", help="Quante volte avresti versato.")
+            fig_pac = px.line(res_pac["serie"], labels={"value": f"Valore ({val})", "index": "Data", "variable": ""})
+            fig_pac.update_layout(hovermode="x unified", legend_title_text="")
+            st.plotly_chart(fig_pac, width="stretch")
+            st.caption(
+                "Il PAC riduce il rischio di «entrare nel momento sbagliato»; l'investimento unico, però, "
+                "storicamente rende spesso di più perché i soldi restano investiti più a lungo. "
+                "⚠️ Backtest storico, non una previsione."
+            )
+
+# === Proiezione a obiettivo ================================================
+with tab_obiettivo:
+    st.subheader("Proiezione a obiettivo")
+    st.caption(
+        "Quanto dovresti versare ogni mese per raggiungere una certa cifra, usando rendimento e "
+        "volatilità **storici** del tuo portafoglio. Stima statistica con scenari, non una garanzia."
+    )
+    co1, co2 = st.columns(2)
+    obiettivo_eur = co1.number_input(
+        "Obiettivo (€)", min_value=1000.0, value=100000.0, step=1000.0,
+        help="La cifra che vorresti raggiungere.",
+    )
+    co2.metric("Orizzonte", f"{orizzonte} anni", help="Si imposta nella barra laterale.")
+
+    with st.spinner("Simulo gli scenari..."):
+        ris_obj = cm.carica_dati(tuple(tickers_ok), "max", None, None, ss.valuta_base, ss.converti)
+    if ris_obj.prezzi.empty:
+        st.warning("Storico non disponibile per il calcolo.")
+    else:
+        serie_pf_obj = mtr.serie_rendimenti_portafoglio(mtr.rendimenti_giornalieri(ris_obj.prezzi), pesi)
+        mu = mtr.cagr(serie_pf_obj)
+        sigma = mtr.volatilita_annua(serie_pf_obj)
+        st.caption(f"Ipotesi dal tuo portafoglio: rendimento storico **{mu:.1%}/anno**, volatilità **{sigma:.1%}**.")
+        proj = mtr.proiezione_obiettivo(mu, sigma, obiettivo_eur, orizzonte)
+        if proj is None:
+            st.warning("Parametri non validi.")
+        else:
+            val = ss.valuta_base if ss.converti else ""
+            st.metric(
+                "Versamento mensile necessario (stima)", f"{proj['pmt_mensile']:,.0f} {val}",
+                help="Quanto versare ogni mese per centrare l'obiettivo nello scenario medio.",
+            )
+            sc1, sc2, sc3 = st.columns(3)
+            sc1.metric("Scenario pessimista", f"{proj['pessimista']:,.0f} {val}",
+                       help="Tra i casi peggiori (10° percentile delle simulazioni).")
+            sc2.metric("Scenario medio", f"{proj['medio']:,.0f} {val}", help="Il caso centrale (50%).")
+            sc3.metric("Scenario ottimista", f"{proj['ottimista']:,.0f} {val}",
+                       help="Tra i casi migliori (90° percentile delle simulazioni).")
+            st.caption(f"Probabilità stimata di raggiungere l'obiettivo con quel versamento: **{proj['prob_obiettivo']:.0%}**.")
+            bande = proj["bande"].copy()
+            bande.index = bande.index / 12.0
+            fig_obj = px.line(bande, labels={"value": f"Valore ({val})", "index": "Anni", "variable": ""})
+            fig_obj.add_hline(y=obiettivo_eur, line_dash="dot", line_color="green", annotation_text="obiettivo")
+            fig_obj.update_layout(hovermode="x unified", legend_title_text="")
+            st.plotly_chart(fig_obj, width="stretch")
+            st.caption("⚠️ Simulazione statistica (Monte Carlo) su ipotesi storiche: il futuro può essere diverso.")
 
 # === Lettura statistica del portafoglio ===================================
 with tab_stat:
