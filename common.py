@@ -17,6 +17,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 import data as dati
+import dataset_composizioni as dsc
 import metrics as mtr
 
 ss = st.session_state
@@ -374,6 +375,25 @@ def mostra_avvisi_qualita(prezzi: pd.DataFrame):
     """Mostra gli avvisi di qualità dei dati (storico, buchi, anomalie)."""
     for livello, msg in dati.controlla_qualita(prezzi):
         (st.warning if livello == "warning" else st.info)("🔎 " + msg)
+
+
+def composizione_effettiva(tickers) -> dict:
+    """Composizione paese/settore per i ticker: manuale (override) o dataset interno.
+
+    Se l'utente ha inserito a mano (o da CSV) la composizione di un asset, quella
+    ha la precedenza; altrimenti si usa il dataset interno ``dataset_composizioni``.
+    """
+    out = {}
+    for t in tickers:
+        manuale = ss.composizione.get(t, {})
+        if manuale.get("paese") or manuale.get("settore"):
+            out[t] = {"paese": dict(manuale.get("paese", {})),
+                      "settore": dict(manuale.get("settore", {}))}
+        else:
+            nota = dsc.composizione_nota(t)
+            if nota:
+                out[t] = nota
+    return out
 
 
 def mostra_glossario():

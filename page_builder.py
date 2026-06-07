@@ -321,9 +321,9 @@ with tab_alloc:
     st.divider()
     st.subheader("Composizione per paese e settore")
     st.info(
-        "La composizione (holdings) **non** si ricava dai prezzi. Si può provare a recuperare i "
-        "settori da yfinance (spesso assenti per ETF UCITS europei) e/o inserirla a mano qui sotto "
-        "o da CSV. Le righe sono identificate dal **ticker**."
+        "Per i principali ETF/indici la ripartizione **geografica e settoriale** è già inclusa in un "
+        "**dataset interno** (stime indicative dai factsheet) e viene usata **in automatico**. Puoi "
+        "comunque correggerla o aggiungerla a mano (o da CSV) qui sotto: la tua versione ha la precedenza."
     )
 
     cbtn1, cbtn2 = st.columns(2)
@@ -370,14 +370,32 @@ with tab_alloc:
     )
 
     st.divider()
+
+    # Composizione effettiva: manuale (override) oppure dataset interno.
+    comp_eff = cm.composizione_effettiva(tickers_ok)
+
+    # Alert di sovrapposizione: asset azionari che espongono agli stessi mercati.
+    equity = {t for t in tickers_ok if ac_map.get(t, {}).get("Azioni", 0.0) >= 0.5}
+    distrib_paese = {t: comp_eff[t]["paese"] for t in equity
+                     if comp_eff.get(t, {}).get("paese")}
+    coppie_ov = mtr.coppie_sovrapposte(distrib_paese, soglia=0.9)
+    if coppie_ov:
+        righe = "; ".join(f"**{nomi.get(a, a)}** ↔ **{nomi.get(b, b)}** ({s:.0%} simili)"
+                          for a, b, s in coppie_ov)
+        st.warning(
+            f"⚠️ **Sovrapposizione**: {righe}. Questi asset azionari espongono in gran parte "
+            "agli **stessi mercati/aziende** (es. un indice mondiale contiene già gran parte dell'S&P 500): "
+            "tenerli entrambi aggiunge poca diversificazione."
+        )
+
     for tipo, titolo in (("paese", "Distribuzione per paese"), ("settore", "Distribuzione per settore")):
         st.subheader(titolo)
-        serie, mancanti = mtr.aggrega_composizione(pesi, ss.composizione, tipo)
+        serie, mancanti = mtr.aggrega_composizione(pesi, comp_eff, tipo)
         if mancanti:
-            st.warning(
+            st.caption(
                 f"Composizione **{tipo}** non disponibile per: "
-                f"{', '.join(nomi.get(t, t) for t in mancanti)}. "
-                "Questi asset sono esclusi dall'aggregazione (inseriscili sopra per includerli)."
+                f"{', '.join(nomi.get(t, t) for t in mancanti)} (esclusi dall'aggregazione; "
+                "aggiungila a mano qui sopra per includerli)."
             )
         if serie.empty:
             st.caption(f"Nessuna composizione di tipo «{tipo}» disponibile.")

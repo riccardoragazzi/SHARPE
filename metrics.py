@@ -604,6 +604,32 @@ def aggrega_composizione(
     return serie, mancanti
 
 
+def coppie_sovrapposte(distribuzioni: dict[str, dict[str, float]], soglia: float = 0.9):
+    """Coppie di asset con distribuzioni molto **simili** (cosine ≥ soglia).
+
+    ``distribuzioni`` = {ticker: {categoria: frazione}} (es. ripartizione per
+    paese). Serve a segnalare asset che espongono in gran parte agli stessi
+    mercati/aziende (es. MSCI World e S&P 500). Restituisce
+    ``[(ticker_a, ticker_b, similarità), ...]``.
+    """
+    items = [(t, d) for t, d in distribuzioni.items() if d]
+    coppie = []
+    for i in range(len(items)):
+        ta, da = items[i]
+        for j in range(i + 1, len(items)):
+            tb, db = items[j]
+            chiavi = set(da) | set(db)
+            va = np.array([da.get(k, 0.0) for k in chiavi])
+            vb = np.array([db.get(k, 0.0) for k in chiavi])
+            na, nb = np.linalg.norm(va), np.linalg.norm(vb)
+            if na == 0 or nb == 0:
+                continue
+            sim = float(va @ vb / (na * nb))
+            if sim >= soglia:
+                coppie.append((ta, tb, sim))
+    return coppie
+
+
 # ---------------------------------------------------------------------------
 # Extra: minima varianza e frontiera efficiente
 # ---------------------------------------------------------------------------
