@@ -50,6 +50,7 @@ DEFAULT_PESI = [50.0, 20.0, 30.0]
 # Portafogli "famosi" ricostruiti con ETF rappresentativi (USA, storia lunga).
 # I pesi sommano a 1. Usati per il confronto nella pagina Builder.
 PORTAFOGLI_FAMOSI = {
+    "100% MSCI World": {"URTH": 1.0},
     "60/40 (azioni/obbligazioni)": {"VTI": 0.60, "AGG": 0.40},
     "All Weather (Ray Dalio)": {"VTI": 0.30, "TLT": 0.40, "IEI": 0.15, "GLD": 0.075, "DBC": 0.075},
     "Golden Butterfly": {"VTI": 0.20, "IWN": 0.20, "TLT": 0.20, "SHY": 0.20, "GLD": 0.20},
@@ -80,6 +81,17 @@ def carica_settori(tickers):
         sw = dati.scarica_settori(t)
         if sw:
             out[t] = {SETTORI_IT.get(k, k.title()): v for k, v in sw.items()}
+    return out
+
+
+@st.cache_data(show_spinner=False)
+def carica_asset_classes(tickers):
+    """Recupera (dove possibile) la composizione per classe di attività."""
+    out = {}
+    for t in tickers:
+        ac = dati.scarica_asset_classes(t)
+        if ac:
+            out[t] = ac
     return out
 
 
@@ -236,6 +248,8 @@ def init_state():
         ss.composizione = {}
     if "risultati" not in ss:
         ss.risultati = []
+    if "costi" not in ss:
+        ss.costi = {}
 
 
 def sidebar_parametri():

@@ -147,9 +147,10 @@ with st.expander("Come leggo questo riepilogo?"):
 # Tab di analisi del portafoglio
 # ---------------------------------------------------------------------------
 
-tab_asset, tab_pf, tab_alloc, tab_timing, tab_pac, tab_obiettivo, tab_stat, tab_opt, tab_conf = st.tabs(
+(tab_asset, tab_pf, tab_alloc, tab_timing, tab_pac, tab_obiettivo, tab_costi, tab_rib,
+ tab_stat, tab_opt, tab_conf) = st.tabs(
     ["📈 Singoli asset", "💼 Portafoglio", "🌍 Allocazione", "⏱️ Timing", "💶 PAC", "🎯 Obiettivo",
-     "📊 Statistica", "🧮 Ottimizzazione", "🆚 Confronto"]
+     "💰 Costi e tasse", "♻️ Ribilanciamento", "📊 Statistica", "🧮 Ottimizzazione", "🆚 Confronto"]
 )
 
 # === Singoli asset =========================================================
@@ -197,16 +198,53 @@ with tab_pf:
     fig_cmp.update_layout(hovermode="x unified")
     st.plotly_chart(fig_cmp, width="stretch")
 
+    # Confronto sempre disponibile con benchmark di riferimento.
+    st.subheader("Portafoglio vs benchmark di riferimento (base 100)")
+    serie_bench = {"Il mio portafoglio": serie_pf}
+    with st.spinner("Carico i benchmark..."):
+        for nome_b in ["100% MSCI World", "60/40 (azioni/obbligazioni)"]:
+            sb, _ = cm.rendimenti_portafoglio_famoso(
+                nome_b, ss.period, ss.data_inizio, ss.data_fine, ss.valuta_base, ss.converti)
+            if not sb.empty:
+                serie_bench[nome_b] = sb
+    df_bench = pd.DataFrame(serie_bench).dropna()
+    if df_bench.shape[1] >= 2:
+        cum_b = mtr.serie_cumulata(df_bench, base=100.0)
+        fig_b = px.line(cum_b, labels={"value": "Indice (base 100)", "index": "Data", "variable": "Serie"})
+        fig_b.update_traces(line=dict(width=1.4))
+        fig_b.update_traces(selector=dict(name="Il mio portafoglio"), line=dict(width=3.2, color="black"))
+        fig_b.update_layout(hovermode="x unified")
+        st.plotly_chart(fig_b, width="stretch")
+        st.dataframe(cm.formatta_metriche(mtr.metriche_asset(df_bench, risk_free)), width="stretch")
+        st.caption(
+            "Riferimenti: **100% MSCI World** (tutte le azioni mondiali) e **60/40** "
+            "(60% azioni, 40% obbligazioni). Allineati sul periodo comune."
+        )
+    else:
+        st.caption("Benchmark non disponibili per questo periodo.")
+
     col_a, col_b = st.columns(2)
     with col_a:
         st.subheader("Matrice di correlazione")
-        corr = mtr.matrice_correlazione(rendimenti).rename(index=nomi_corti, columns=nomi_corti)
+        corr_grezza = mtr.matrice_correlazione(rendimenti)
+        corr = corr_grezza.rename(index=nomi_corti, columns=nomi_corti)
         fig_corr = px.imshow(corr, text_auto=".2f", color_continuous_scale="RdBu_r", zmin=-1, zmax=1, aspect="auto")
         st.plotly_chart(fig_corr, width="stretch")
         st.caption(
             "Valori vicini a 1 = molto correlati (poca diversificazione); "
             "vicini a 0 o negativi = scorrelati (maggiore diversificazione)."
         )
+        # Alert su asset molto sovrapposti.
+        cols_c = list(corr_grezza.columns)
+        coppie = [(cols_c[ii], cols_c[jj], corr_grezza.iloc[ii, jj])
+                  for ii in range(len(cols_c)) for jj in range(ii + 1, len(cols_c))
+                  if corr_grezza.iloc[ii, jj] > 0.9]
+        if coppie:
+            righe = "; ".join(f"**{nomi.get(a, a)}** ↔ **{nomi.get(b, b)}** ({c:.0%})" for a, b, c in coppie)
+            st.warning(
+                f"⚠️ Asset molto sovrapposti (correlazione > 90%): {righe}. "
+                "Si muovono quasi insieme: tenerli entrambi aggiunge poca diversificazione."
+            )
     with col_b:
         st.subheader("Contributo al rischio")
         rc = mtr.contributo_rischio(rendimenti, pesi).rename(index=nomi)
@@ -230,6 +268,34 @@ with tab_pf:
 
 # === Allocazione ===========================================================
 with tab_alloc:
+    st.subheader("Composizione per classe di attività (asset class)")
+    st.caption(
+        "Recuperata **automaticamente** da Yahoo (azioni / obbligazioni / liquidità). "
+        "Oro e materie prime spesso finiscono in «Altro»."
+    )
+    ac_map = cm.carica_asset_classes(tuple(tickers_ok))
+    if not ac_map:
+        st.caption("Dati di asset class non disponibili per questi asset.")
+    else:
+        comp_ac = {t: {"asset_class": classi} for t, classi in ac_map.items()}
+        serie_ac, mancanti_ac = mtr.aggrega_composizione(pesi, comp_ac, "asset_class")
+        if mancanti_ac:
+            st.caption("Asset class non disponibile per: " + ", ".join(nomi.get(t, t) for t in mancanti_ac))
+        if not serie_ac.empty:
+            ca1, ca2 = st.columns(2)
+            with ca1:
+                fig_ac = px.pie(values=serie_ac.values, names=serie_ac.index, hole=0.35)
+                fig_ac.update_traces(textposition="inside", textinfo="percent+label")
+                st.plotly_chart(fig_ac, width="stretch")
+            with ca2:
+                df_ac = serie_ac.reset_index()
+                df_ac.columns = ["Classe", "Peso"]
+                fig_acb = px.bar(df_ac, x="Peso", y="Classe", orientation="h")
+                fig_acb.update_xaxes(tickformat=".0%")
+                fig_acb.update_layout(yaxis={"categoryorder": "total ascending"})
+                st.plotly_chart(fig_acb, width="stretch")
+
+    st.divider()
     st.subheader("Composizione per paese e settore")
     st.info(
         "La composizione (holdings) **non** si ricava dai prezzi. Si può provare a recuperare i "
@@ -467,6 +533,99 @@ with tab_obiettivo:
             fig_obj.update_layout(hovermode="x unified", legend_title_text="")
             st.plotly_chart(fig_obj, width="stretch")
             st.caption("⚠️ Simulazione statistica (Monte Carlo) su ipotesi storiche: il futuro può essere diverso.")
+
+# === Costi (TER) e fiscalità ==============================================
+with tab_costi:
+    st.subheader("Costi (TER) e fiscalità — stime didattiche")
+    st.caption(
+        "Inserisci il **TER** (costo annuo dell'ETF) e l'**aliquota** fiscale di ogni asset. "
+        "In Italia: **26%** in generale, **12,5%** sui titoli di Stato/white-list; **bollo 0,2%/anno**."
+    )
+    righe_costi = []
+    for t in tickers_ok:
+        c = ss.costi.get(t, {})
+        righe_costi.append({"Ticker": t, "Asset": nomi.get(t, t),
+                            "TER %": float(c.get("ter", 0.20)),
+                            "Aliquota %": float(c.get("aliquota", 26.0))})
+    df_costi = st.data_editor(
+        pd.DataFrame(righe_costi), width="stretch", key="editor_costi", hide_index=True,
+        column_config={
+            "Ticker": st.column_config.TextColumn("Ticker", disabled=True),
+            "Asset": st.column_config.TextColumn("Asset", disabled=True),
+            "TER %": st.column_config.NumberColumn(
+                "TER %", min_value=0.0, max_value=5.0, step=0.01,
+                help="Costo annuo dell'ETF, lo trovi nel KID (es. 0,20%)."),
+            "Aliquota %": st.column_config.NumberColumn(
+                "Aliquota %", min_value=0.0, max_value=43.0, step=0.5,
+                help="26% azioni e obbligazioni societarie; 12,5% titoli di Stato/white-list."),
+        },
+    )
+    ter_pesato, aliq_pesata = 0.0, 0.0
+    for _, rr in df_costi.iterrows():
+        t = rr["Ticker"]
+        ss.costi[t] = {"ter": float(rr["TER %"]), "aliquota": float(rr["Aliquota %"])}
+        w = float(pesi.get(t, 0.0))
+        ter_pesato += w * float(rr["TER %"]) / 100.0
+        aliq_pesata += w * float(rr["Aliquota %"]) / 100.0
+    st.caption(f"TER medio del portafoglio: **{ter_pesato:.2%}/anno** · aliquota media: **{aliq_pesata:.1%}**.")
+
+    importo_c = st.number_input(
+        "Capitale di esempio (€)", min_value=100.0, value=10000.0, step=100.0,
+        help="Su quale capitale calcolare l'impatto di costi e tasse nel tempo.")
+    serie_pf_c = mtr.serie_rendimenti_portafoglio(rendimenti, pesi)
+    rendimento_lordo = mtr.cagr(serie_pf_c)
+    if pd.isna(rendimento_lordo):
+        rendimento_lordo = 0.05
+    st.caption(f"Ipotesi di rendimento lordo: **{rendimento_lordo:.1%}/anno** (storico del portafoglio).")
+
+    orizzonti = sorted({10, 20, int(orizzonte)})
+    cols_anni = st.columns(len(orizzonti))
+    for col, anni_c in zip(cols_anni, orizzonti):
+        res_c = mtr.proiezione_costi(importo_c, rendimento_lordo, ter_pesato, aliq_pesata, anni_c)
+        with col:
+            st.markdown(f"**A {anni_c} anni**")
+            st.metric("Valore lordo", f"{res_c['val_lordo']:,.0f} €", help="Senza costi né tasse.")
+            st.metric("Costo del TER", f"−{res_c['costo_ter']:,.0f} €", help="Quanto ti sarebbe costato il TER.")
+            st.metric("Tasse stimate", f"−{res_c['tasse']:,.0f} €", help="Tasse sul guadagno, alla vendita.")
+            st.metric("Valore netto", f"{res_c['val_netto']:,.0f} €", help="Dopo TER, bollo e tasse.")
+    st.caption("⚠️ Stima didattica: la fiscalità reale dipende dallo strumento e dalla normativa vigente.")
+
+# === Ribilanciamento vs buy & hold ========================================
+with tab_rib:
+    st.subheader("Ribilanciamento vs «compra e tieni»")
+    st.caption(
+        "Confronta il lasciare il portafoglio com'è (**buy & hold**: i pesi cambiano da soli) "
+        "col **ribilanciarlo** periodicamente per riportarlo ai pesi scelti. Usa tutto lo storico."
+    )
+    modo_label = st.radio(
+        "Strategia di ribilanciamento", ["Annuale", "A soglia"], horizontal=True,
+        help="Annuale: ogni 12 mesi. A soglia: quando un peso si scosta troppo dal target.")
+    soglia = 0.05
+    if modo_label == "A soglia":
+        soglia = st.slider(
+            "Soglia di scostamento (%)", 2, 20, 5, 1,
+            help="Ribilancia quando un peso supera questo scostamento dai pesi target.") / 100.0
+
+    with st.spinner("Simulo le due strategie..."):
+        ris_rib = cm.carica_dati(tuple(tickers_ok), "max", None, None, ss.valuta_base, ss.converti)
+    if ris_rib.prezzi.empty:
+        st.warning("Storico non disponibile per il calcolo.")
+    else:
+        modo = "annuale" if modo_label == "Annuale" else "soglia"
+        res_rib = mtr.simula_ribilanciamento(ris_rib.prezzi, pesi, modo, soglia)
+        serie_rib = res_rib["serie"]
+        if serie_rib.empty:
+            st.warning("Dati insufficienti per la simulazione.")
+        else:
+            fig_rib = px.line(serie_rib, labels={"value": "Indice (base 100)", "index": "Data", "variable": "Strategia"})
+            fig_rib.update_layout(hovermode="x unified")
+            st.plotly_chart(fig_rib, width="stretch")
+            met_rib = mtr.metriche_asset(mtr.rendimenti_giornalieri(serie_rib), risk_free)
+            st.dataframe(cm.formatta_metriche(met_rib), width="stretch")
+            st.caption(
+                f"Numero di ribilanci: **{res_rib['n_ribilanci']}**. "
+                "⚠️ Non sono inclusi costi di transazione o tasse sui ribilanci (analisi didattica)."
+            )
 
 # === Lettura statistica del portafoglio ===================================
 with tab_stat:

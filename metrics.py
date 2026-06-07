@@ -474,6 +474,91 @@ def riepilogo_portafoglio(rendimenti: pd.DataFrame, pesi: pd.Series, orizzonte: 
 
 
 # ---------------------------------------------------------------------------
+# Costi (TER) e fiscalità (stime didattiche)
+# ---------------------------------------------------------------------------
+
+def proiezione_costi(
+    importo: float, rendimento_lordo: float, ter_pesato: float,
+    aliquota_pesata: float, anni: int, bollo: float = 0.002,
+) -> dict:
+    """Stima l'impatto di costi (TER), bollo e tasse su un capitale nel tempo.
+
+    Modello didattico: il rendimento annuo lordo viene ridotto dal **TER** e dal
+    **bollo** (0,2%/anno) in modo composto; alla fine si applicano le **tasse**
+    (aliquota sul guadagno, alla vendita). Restituisce i valori intermedi.
+    """
+    g = rendimento_lordo
+    anni = max(0, int(anni))
+    val_lordo = importo * (1.0 + g) ** anni
+    val_dopo_ter = importo * (1.0 + g - ter_pesato) ** anni
+    val_dopo_bollo = importo * (1.0 + g - ter_pesato - bollo) ** anni
+    guadagno = max(val_dopo_bollo - importo, 0.0)
+    tasse = guadagno * aliquota_pesata
+    val_netto = val_dopo_bollo - tasse
+    return {
+        "val_lordo": float(val_lordo),
+        "val_dopo_ter": float(val_dopo_ter),
+        "costo_ter": float(val_lordo - val_dopo_ter),
+        "val_dopo_bollo": float(val_dopo_bollo),
+        "tasse": float(tasse),
+        "val_netto": float(val_netto),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Ribilanciamento vs buy & hold
+# ---------------------------------------------------------------------------
+
+def simula_ribilanciamento(
+    prezzi: pd.DataFrame, pesi: pd.Series, modo: str = "annuale", parametro: float = 0.05,
+) -> dict:
+    """Confronta **buy & hold** e **ribilanciamento** (annuale o a soglia).
+
+    - buy & hold: quote iniziali fisse, i pesi derivano col tempo;
+    - annuale: riporta ai pesi target ogni ~365 giorni;
+    - a soglia: ribilancia quando un peso si scosta oltre ``parametro`` dal target.
+
+    Restituisce le due curve (base 100), il numero di ribilanci e le serie dei
+    rendimenti per le statistiche.
+    """
+    prezzi = prezzi.dropna()
+    colonne = list(prezzi.columns)
+    if prezzi.empty or len(colonne) < 1:
+        return {"serie": pd.DataFrame(), "n_ribilanci": 0}
+    w_target = normalizza_pesi(pesi, colonne).values
+    P = prezzi.values.astype(float)
+    n_giorni = P.shape[0]
+    date = prezzi.index
+
+    quote_bh = w_target / P[0]
+    valore_bh = (quote_bh * P).sum(axis=1)
+
+    valore_rb = np.empty(n_giorni)
+    quote = w_target / P[0]
+    n_rib = 0
+    ultimo = date[0]
+    for i in range(n_giorni):
+        val = float((quote * P[i]).sum())
+        valore_rb[i] = val
+        pesi_correnti = quote * P[i] / val
+        if modo == "annuale":
+            ribilancia = (date[i] - ultimo).days >= 365
+        else:  # a soglia
+            ribilancia = float(np.max(np.abs(pesi_correnti - w_target))) > parametro
+        if ribilancia and i < n_giorni - 1:
+            quote = w_target * val / P[i]
+            n_rib += 1
+            ultimo = date[i]
+
+    serie = pd.DataFrame(
+        {"Buy & hold": 100.0 * valore_bh / valore_bh[0],
+         "Ribilanciato": 100.0 * valore_rb / valore_rb[0]},
+        index=date,
+    )
+    return {"serie": serie, "n_ribilanci": n_rib}
+
+
+# ---------------------------------------------------------------------------
 # Allocazione paese / settore
 # ---------------------------------------------------------------------------
 

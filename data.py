@@ -312,6 +312,31 @@ def scarica_settori(ticker: str) -> dict[str, float]:
         return {}
 
 
+def scarica_asset_classes(ticker: str) -> dict[str, float]:
+    """Recupera la composizione per **classe di attività** di un ETF da yfinance.
+
+    Da ``Ticker.funds_data.asset_classes`` (stock/bond/cash/…), restituisce una
+    mappa {Azioni, Obbligazioni, Liquidità, Altro} -> peso (frazione). Per molti
+    ETF è disponibile; in caso contrario ritorna ``{}``. L'oro/le materie prime
+    di solito finiscono in "Altro" (vanno eventualmente corretti a mano).
+    """
+    try:
+        tk = yf.Ticker(normalizza_ticker(ticker))
+        ac = tk.funds_data.asset_classes
+        if not ac:
+            return {}
+        d = {k: float(v or 0.0) for k, v in dict(ac).items()}
+        out = {
+            "Azioni": d.get("stockPosition", 0.0) + d.get("preferredPosition", 0.0),
+            "Obbligazioni": d.get("bondPosition", 0.0) + d.get("convertiblePosition", 0.0),
+            "Liquidità": d.get("cashPosition", 0.0),
+            "Altro": d.get("otherPosition", 0.0),
+        }
+        return {k: v for k, v in out.items() if v > 0.0005}
+    except Exception:
+        return {}
+
+
 def carica_composizione_csv(contenuto: str | bytes) -> dict[str, dict[str, dict[str, float]]]:
     """Carica una composizione (paese/settore) per ticker da un CSV.
 
