@@ -18,6 +18,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 import common as cm
+import dataset_composizioni as dsc
 import metrics as mtr
 
 ss = st.session_state
@@ -68,7 +69,11 @@ else:
         st.caption("Risultati — «📈 Analizza» per vederne l'analisi, «➕» per aggiungerlo al portafoglio:")
         for r in ss.risultati_analisi:
             rc1, rc2, rc3 = st.columns([5, 1, 1])
-            rc1.markdown(f"**{r['nome']}**  \n`{r['symbol']}` · {r['tipo'] or 'n/d'} · {r['borsa'] or 'n/d'}")
+            _iz = dsc.isin_di(r["symbol"])
+            rc1.markdown(
+                f"**{r['nome']}**  \n`{r['symbol']}` · {r['tipo'] or 'n/d'} · {r['borsa'] or 'n/d'}"
+                + (f" · ISIN `{_iz}`" if _iz else "")
+            )
             rc2.button("📈 Analizza", key=f"an_{r['symbol']}", on_click=_scegli_analisi,
                        args=(r["symbol"], r["nome"]), width="stretch")
             gia = r["symbol"] in ss.selezionati["Ticker"].values

@@ -165,6 +165,34 @@ ISIN_MAP: dict[str, str] = {
 }
 
 
+# --- Mappa ticker -> ISIN (per i fondi più comuni, dove certo) --------------
+
+TICKER_TO_ISIN: dict[str, str] = {
+    "SWDA.MI": "IE00B4L5Y983", "IWDA.AS": "IE00B4L5Y983", "IWDA.L": "IE00B4L5Y983",
+    "EUNL.DE": "IE00B4L5Y983", "SWDA.L": "IE00B4L5Y983",
+    "CSPX.MI": "IE00B5BMR087", "CSSPX.MI": "IE00B5BMR087", "SXR8.DE": "IE00B5BMR087",
+    "VWCE.DE": "IE00BK5BQT80", "VWCE.MI": "IE00BK5BQT80",
+    "VWRL.AS": "IE00B3RBWM25", "VWRL.L": "IE00B3RBWM25",
+    "EIMI.MI": "IE00BKM4GZ66", "EIMI.L": "IE00BKM4GZ66",
+    "EQQQ.MI": "IE00BFMXXD54", "EQQQ.DE": "IE00BFMXXD54",
+    "AGGH.MI": "IE00BDBRDM35", "AGGH.L": "IE00BDBRDM35",
+    "IMEU.MI": "IE00B4K48X80",
+}
+
+# Composizioni canoniche che sono "titoli di Stato" (aliquota fiscale 12,5%).
+_GOVT_CANONICI = {"EUR_GOVT_BOND", "US_TREASURY"}
+
+
+def isin_di(ticker: str) -> str:
+    """ISIN noto per un ticker (dal dataset interno), altrimenti stringa vuota."""
+    return TICKER_TO_ISIN.get(str(ticker).strip().upper(), "")
+
+
+def is_titolo_stato(ticker: str) -> bool:
+    """True se il ticker è un ETF di **titoli di Stato** (aliquota 12,5%)."""
+    return TICKER_MAP.get(str(ticker).strip().upper()) in _GOVT_CANONICI
+
+
 def _percentuali_a_frazioni(d: dict[str, float]) -> dict[str, float]:
     """Normalizza un dizionario di percentuali a frazioni che sommano a 1."""
     tot = sum(d.values())

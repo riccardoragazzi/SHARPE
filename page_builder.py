@@ -15,6 +15,7 @@ import streamlit as st
 
 import common as cm
 import data as dati
+import dataset_composizioni as dsc
 import metrics as mtr
 
 ss = st.session_state
@@ -41,8 +42,10 @@ with st.container(border=True):
         for r in ss.risultati:
             rc1, rc2 = st.columns([6, 1])
             gia = r["symbol"] in ss.selezionati["Ticker"].values
+            _iz = dsc.isin_di(r["symbol"])
             rc1.markdown(
                 f"**{r['nome']}**  \n`{r['symbol']}` · {r['tipo'] or 'n/d'} · {r['borsa'] or 'n/d'}"
+                + (f" · ISIN `{_iz}`" if _iz else "")
             )
             rc2.button(
                 "✓ inserito" if gia else "➕ Aggiungi",
@@ -82,7 +85,8 @@ with st.container(border=True):
         if f"w_{t}" not in ss:
             ss[f"w_{t}"] = round(float(riga["Peso %"]), 2) if pd.notna(riga["Peso %"]) else 0.0
         col1, col2, col3 = st.columns([5, 4, 1])
-        col1.markdown(f"**{nome}**  \n`{t}`")
+        _iz = cm.isin_di(t)
+        col1.markdown(f"**{nome}**  \n`{t}`" + (f" · ISIN `{_iz}`" if _iz else ""))
         col2.slider("Peso %", min_value=0.0, max_value=100.0, step=1.0, key=f"w_{t}", label_visibility="collapsed")
         col3.button("🗑", key=f"del_{t}", on_click=cm.cb_rimuovi, args=(t,))
         pesi_correnti[t] = ss[f"w_{t}"]
@@ -535,12 +539,17 @@ with tab_obiettivo:
         "Quanto dovresti versare ogni mese per raggiungere una certa cifra, usando rendimento e "
         "volatilità **storici** del tuo portafoglio. Stima statistica con scenari, non una garanzia."
     )
-    co1, co2 = st.columns(2)
+    co1, co2, co3 = st.columns(3)
     obiettivo_eur = co1.number_input(
         "Obiettivo (€)", min_value=1000.0, value=100000.0, step=1000.0,
         help="La cifra che vorresti raggiungere.",
     )
-    co2.metric("Orizzonte", f"{orizzonte} anni", help="Si imposta nella barra laterale.")
+    prob_perc = co2.slider(
+        "Probabilità di riuscita", min_value=50, max_value=95, value=75, step=5, format="%d%%",
+        help="Quanto vuoi andare «sul sicuro». Più alta = versamento mensile più alto, ma più "
+             "probabilità di centrare l'obiettivo anche se i mercati vanno male.",
+    )
+    co3.metric("Orizzonte", f"{orizzonte} anni", help="Si imposta nella barra laterale.")
 
     with st.spinner("Simulo gli scenari..."):
         ris_obj = cm.carica_dati(tuple(tickers_ok), "max", None, None, ss.valuta_base, ss.converti)
@@ -551,22 +560,25 @@ with tab_obiettivo:
         mu = mtr.cagr(serie_pf_obj)
         sigma = mtr.volatilita_annua(serie_pf_obj)
         st.caption(f"Ipotesi dal tuo portafoglio: rendimento storico **{mu:.1%}/anno**, volatilità **{sigma:.1%}**.")
-        proj = mtr.proiezione_obiettivo(mu, sigma, obiettivo_eur, orizzonte)
+        proj = mtr.proiezione_obiettivo(mu, sigma, obiettivo_eur, orizzonte, prob_perc / 100.0)
         if proj is None:
             st.warning("Parametri non validi.")
         else:
             val = ss.valuta_base if ss.converti else ""
-            st.metric(
-                "Versamento mensile necessario (stima)", f"{proj['pmt_mensile']:,.0f} {val}",
-                help="Quanto versare ogni mese per centrare l'obiettivo nello scenario medio.",
+            mc1, mc2 = st.columns(2)
+            mc1.metric(
+                f"Versamento mensile (per riuscire ~{proj['prob_target']:.0%})",
+                f"{proj['pmt_mensile']:,.0f} {val}",
+                help="Quanto versare ogni mese per raggiungere l'obiettivo con la probabilità scelta.",
             )
+            mc2.metric("Probabilità stimata di riuscita", f"{proj['prob_effettiva']:.0%}",
+                       help="Quota di scenari simulati in cui l'obiettivo viene raggiunto con quel versamento.")
             sc1, sc2, sc3 = st.columns(3)
             sc1.metric("Scenario pessimista", f"{proj['pessimista']:,.0f} {val}",
                        help="Tra i casi peggiori (10° percentile delle simulazioni).")
             sc2.metric("Scenario medio", f"{proj['medio']:,.0f} {val}", help="Il caso centrale (50%).")
             sc3.metric("Scenario ottimista", f"{proj['ottimista']:,.0f} {val}",
                        help="Tra i casi migliori (90° percentile delle simulazioni).")
-            st.caption(f"Probabilità stimata di raggiungere l'obiettivo con quel versamento: **{proj['prob_obiettivo']:.0%}**.")
             bande = proj["bande"].copy()
             bande.index = bande.index / 12.0
             fig_obj = px.line(bande, labels={"value": f"Valore ({val})", "index": "Anni", "variable": ""})
@@ -579,15 +591,17 @@ with tab_obiettivo:
 with tab_costi:
     st.subheader("Costi (TER) e fiscalità — stime didattiche")
     st.caption(
-        "Inserisci il **TER** (costo annuo dell'ETF) e l'**aliquota** fiscale di ogni asset. "
-        "In Italia: **26%** in generale, **12,5%** sui titoli di Stato/white-list; **bollo 0,2%/anno**."
+        "TER (costo annuo) e **aliquota** fiscale **per singolo asset**. L'aliquota è impostata in "
+        "**automatico** (12,5% per gli ETF di **titoli di Stato** riconosciuti, 26% per il resto) e "
+        "puoi modificarla. In Italia c'è anche il **bollo 0,2%/anno**."
     )
     righe_costi = []
     for t in tickers_ok:
         c = ss.costi.get(t, {})
+        aliq_default = 12.5 if dsc.is_titolo_stato(t) else 26.0
         righe_costi.append({"Ticker": t, "Asset": nomi.get(t, t),
                             "TER %": float(c.get("ter", 0.20)),
-                            "Aliquota %": float(c.get("aliquota", 26.0))})
+                            "Aliquota %": float(c.get("aliquota", aliq_default))})
     df_costi = st.data_editor(
         pd.DataFrame(righe_costi), width="stretch", key="editor_costi", hide_index=True,
         column_config={
@@ -707,9 +721,11 @@ with tab_opt:
                                     help="Lascia attivo: niente vendite allo scoperto.")
         if obiettivo in ("max_sharpe", "max_ret"):
             st.warning(
-                "ℹ️ «Massimo Sharpe» e «Massimo rendimento» guardano **solo al passato** e tendono a "
-                "**concentrare** su pochi asset: il passato non si ripete uguale. Per un portafoglio più "
-                "equilibrato valuta **Minima varianza** o **Risk parity**."
+                "⚠️ «Massimo Sharpe» e «Massimo rendimento» sono **backward-looking**: si "
+                "**sovra-adattano allo storico** (overfitting) e tendono a **concentrare** il "
+                "portafoglio su pochi asset che sono andati bene in passato — cosa che non si ripete "
+                "uguale. Per il **lungo periodo** sono di solito più robuste **Minima varianza** o "
+                "**Risk parity**."
             )
         if not mtr.SCIPY_DISPONIBILE:
             st.caption("scipy non disponibile: si usano soluzioni analitiche (possono dare pesi negativi).")

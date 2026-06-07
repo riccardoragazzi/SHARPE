@@ -366,47 +366,52 @@ def simula_pac(serie_rendimenti: pd.Series, importo: float = 100.0, frequenza_me
 
 def proiezione_obiettivo(
     mu_annuo: float, sigma_annuo: float, obiettivo: float, anni: int,
-    n_sim: int = 1500, seed: int = 0,
+    prob_target: float = 0.75, n_sim: int = 2000, seed: int = 0,
 ) -> dict | None:
-    """Proiezione FUTURA: versamento mensile per raggiungere un obiettivo.
+    """Proiezione FUTURA: versamento mensile per un obiettivo, a probabilità scelta.
 
-    Calcola il versamento mensile (PMT) necessario per arrivare a ``obiettivo``
-    euro tra ``anni`` anni, usando il rendimento atteso ``mu_annuo`` (scenario
-    mediano). Poi, con quel PMT, fa una **simulazione Monte Carlo** (rendimenti
-    mensili ~Normale) e riporta gli scenari pessimista/medio/ottimista
-    (percentili 10/50/90) e la probabilità di centrare l'obiettivo.
+    Con una **simulazione Monte Carlo** (rendimenti mensili ~Normale) calcola il
+    versamento mensile necessario perché il portafoglio raggiunga ``obiettivo``
+    euro tra ``anni`` anni **con probabilità ≈ ``prob_target``** (es. 75%), non
+    solo "in media". Sfrutta la linearità: il valore finale è proporzionale al
+    versamento, quindi PMT = obiettivo / (percentile (1−q) del valore accumulato
+    da 1 €/mese). Restituisce PMT, probabilità effettiva, scenari e bande nel tempo.
     """
     n = int(anni * 12)
     if n <= 0:
         return None
-    r_m = (1.0 + mu_annuo) ** (1.0 / 12.0) - 1.0     # rendimento mensile mediano
-    if abs(r_m) < 1e-9:
-        pmt = obiettivo / n
-    else:
-        pmt = obiettivo * r_m / ((1.0 + r_m) ** n - 1.0)
-
-    rng = np.random.default_rng(seed)
+    r_m = (1.0 + mu_annuo) ** (1.0 / 12.0) - 1.0
     sig_m = sigma_annuo / np.sqrt(12.0)
+    rng = np.random.default_rng(seed)
     rendimenti = rng.normal(r_m, sig_m, size=(n_sim, n))
 
-    val = np.zeros(n_sim)
-    storia = np.empty((3, n))  # percentili 10/50/90 nel tempo
+    # Valore accumulato versando 1 €/mese (per ogni simulazione e nel tempo).
+    storia = np.empty((n_sim, n))
+    g = np.zeros(n_sim)
     for t in range(n):
-        val = (val + pmt) * (1.0 + rendimenti[:, t])
-        storia[:, t] = np.percentile(val, [10, 50, 90])
+        g = (g + 1.0) * (1.0 + rendimenti[:, t])
+        storia[:, t] = g
+    g_finale = storia[:, -1]
 
+    q = min(max(float(prob_target), 0.50), 0.95)
+    soglia = float(np.percentile(g_finale, (1.0 - q) * 100.0))
+    pmt = obiettivo / soglia if soglia > 0 else np.nan
+    finale = pmt * g_finale
+
+    bande_arr = np.percentile(storia, [10, 50, 90], axis=0) * pmt
     bande = pd.DataFrame(
-        {"Pessimista (10%)": storia[0], "Medio (50%)": storia[1], "Ottimista (90%)": storia[2],
+        {"Pessimista (10%)": bande_arr[0], "Medio (50%)": bande_arr[1], "Ottimista (90%)": bande_arr[2],
          "Capitale versato": pmt * np.arange(1, n + 1)},
         index=np.arange(1, n + 1),
     )
     return {
         "pmt_mensile": float(pmt),
+        "prob_target": q,
+        "prob_effettiva": float((finale >= obiettivo).mean()),
         "totale_versato": float(pmt * n),
-        "pessimista": float(storia[0, -1]),
-        "medio": float(storia[1, -1]),
-        "ottimista": float(storia[2, -1]),
-        "prob_obiettivo": float((val >= obiettivo).mean()),
+        "pessimista": float(np.percentile(finale, 10)),
+        "medio": float(np.percentile(finale, 50)),
+        "ottimista": float(np.percentile(finale, 90)),
         "bande": bande,
     }
 

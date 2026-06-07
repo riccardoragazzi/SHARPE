@@ -20,11 +20,17 @@ occupa solo di ottenere dei prezzi "puliti".
 from __future__ import annotations
 
 import io
+import re
 from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
 import yfinance as yf
+
+
+def _e_isin(testo: str) -> bool:
+    """True se la stringa ha la forma di un ISIN (es. IE00B4L5Y983)."""
+    return bool(re.fullmatch(r"[A-Za-z]{2}[A-Za-z0-9]{9}[0-9]", (testo or "").strip()))
 
 # Mappa indicativa suffisso di borsa -> descrizione, usata solo per aiutare
 # l'utente nell'interfaccia. yfinance richiede il ticker già col suffisso
@@ -489,7 +495,8 @@ def cerca_strumenti(query: str, max_results: int = 12) -> list[dict]:
     # futures. Interroghiamo anche la variante con "ETF" e uniamo i risultati,
     # così si trovano comunque gli ETF/indici cercati per nome.
     sub_query = [query]
-    if "etf" not in query.lower():
+    # Per un ISIN si cerca così com'è (niente variante "… ETF", che farebbe rumore).
+    if not _e_isin(query) and "etf" not in query.lower():
         sub_query.append(f"{query} ETF")
 
     trovati: dict[str, dict] = {}  # symbol -> record (dedup mantenendo il primo)
@@ -536,6 +543,20 @@ def nome_strumento(ticker: str) -> str:
 def nomi_strumenti(tickers: list[str]) -> dict[str, str]:
     """Comodità: mappa ticker -> nome per una lista di ticker."""
     return {normalizza_ticker(t): nome_strumento(t) for t in tickers}
+
+
+def isin_strumento(ticker: str) -> str:
+    """Tenta di ricavare l'ISIN di un ticker da yfinance (spesso non disponibile).
+
+    Restituisce l'ISIN se valido, altrimenti stringa vuota.
+    """
+    try:
+        v = yf.Ticker(normalizza_ticker(ticker)).isin
+        if v and isinstance(v, str) and len(v) >= 12 and v != "-":
+            return v
+    except Exception:
+        pass
+    return ""
 
 
 # ---------------------------------------------------------------------------

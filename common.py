@@ -117,6 +117,13 @@ def nomi_di(tickers):
 
 
 @st.cache_data(show_spinner=False)
+def isin_di(ticker):
+    """ISIN di un ticker: prima dal dataset interno, poi (best effort) da yfinance."""
+    iz = dsc.isin_di(ticker)
+    return iz if iz else dati.isin_strumento(ticker)
+
+
+@st.cache_data(show_spinner=False)
 def ohlcv(ticker, period="max"):
     """Dati OHLCV di un singolo asset per l'analisi tecnica (con cache)."""
     return dati.scarica_ohlcv(ticker, period=period)
