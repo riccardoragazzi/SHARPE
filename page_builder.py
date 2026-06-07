@@ -167,10 +167,11 @@ cm.mostra_glossario()
 # Tab di analisi del portafoglio
 # ---------------------------------------------------------------------------
 
-(tab_asset, tab_pf, tab_alloc, tab_timing, tab_pac, tab_obiettivo, tab_costi, tab_rib,
+(tab_asset, tab_pf, tab_alloc, tab_timing, tab_pac, tab_obiettivo, tab_costi, tab_div, tab_rib,
  tab_stat, tab_opt, tab_conf) = st.tabs(
     ["📈 Singoli asset", "💼 Portafoglio", "🌍 Allocazione", "⏱️ Timing", "💶 PAC", "🎯 Obiettivo",
-     "💰 Costi e tasse", "♻️ Ribilanciamento", "📊 Statistica", "🧮 Ottimizzazione", "🆚 Confronto"]
+     "💰 Costi e tasse", "💸 Dividendi", "♻️ Ribilanciamento", "📊 Statistica", "🧮 Ottimizzazione",
+     "🆚 Confronto"]
 )
 
 # === Singoli asset =========================================================
@@ -656,6 +657,50 @@ with tab_costi:
             st.metric("Tasse stimate", f"−{res_c['tasse']:,.0f} €", help="Tasse sul guadagno, alla vendita.")
             st.metric("Valore netto", f"{res_c['val_netto']:,.0f} €", help="Dopo TER, bollo e tasse.")
     st.caption("⚠️ Stima didattica: la fiscalità reale dipende dallo strumento e dalla normativa vigente.")
+
+# === Dividendi / rendita ===================================================
+with tab_div:
+    st.subheader("Dividendi / rendita stimata")
+    st.caption(
+        "Stima della **rendita annua da dividendi/cedole** del portafoglio (dati Yahoo). "
+        "Gli ETF ad **accumulazione** risultano ~0 perché **reinvestono** i dividendi invece di "
+        "pagarli in contanti: il rendimento c'è, ma resta dentro l'ETF."
+    )
+    capitale_div = st.number_input(
+        "Capitale investito (€)", min_value=100.0, value=10000.0, step=100.0,
+        help="Su quale capitale stimare la rendita annua da dividendi.")
+
+    righe_div, yield_pesato, lordo_tot, netto_tot = [], 0.0, 0.0, 0.0
+    with st.spinner("Stimo i dividendi..."):
+        for t in tickers_ok:
+            y = cm.rendimento_dividendo(t)
+            w = float(pesi.get(t, 0.0))
+            aliq = float(ss.costi.get(t, {}).get(
+                "aliquota", 12.5 if dsc.is_titolo_stato(t) else 26.0)) / 100.0
+            lordo = capitale_div * w * y
+            netto = lordo * (1.0 - aliq)
+            yield_pesato += w * y
+            lordo_tot += lordo
+            netto_tot += netto
+            righe_div.append({"Asset": nomi.get(t, t), "Yield": y,
+                              "Rendita lorda (€)": lordo, "Rendita netta (€)": netto})
+
+    md1, md2, md3 = st.columns(3)
+    md1.metric("Yield medio portafoglio", f"{yield_pesato:.2%}",
+               help="Rendita annua da dividendi in percentuale del capitale.")
+    md2.metric("Rendita annua lorda", f"{lordo_tot:,.0f} €",
+               help="Dividendi/cedole stimati in un anno, al lordo delle tasse.")
+    md3.metric("Rendita annua netta", f"{netto_tot:,.0f} €",
+               help="Al netto dell'imposta italiana (26%, oppure 12,5% sui titoli di Stato).")
+    st.dataframe(
+        pd.DataFrame(righe_div).style.format(
+            {"Yield": "{:.2%}", "Rendita lorda (€)": "{:,.0f}", "Rendita netta (€)": "{:,.0f}"}),
+        width="stretch",
+    )
+    st.caption(
+        "⚠️ Stima dai dati Yahoo (dividendi degli ultimi 12 mesi ÷ prezzo): può mancare o variare nel "
+        "tempo, e non considera l'eventuale ritenuta estera alla fonte. A scopo didattico."
+    )
 
 # === Ribilanciamento vs buy & hold ========================================
 with tab_rib:

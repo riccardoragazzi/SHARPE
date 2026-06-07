@@ -124,6 +124,12 @@ def isin_di(ticker):
 
 
 @st.cache_data(show_spinner=False)
+def rendimento_dividendo(ticker):
+    """Rendimento da dividendo annuo stimato (con cache)."""
+    return dati.rendimento_dividendo(ticker)
+
+
+@st.cache_data(show_spinner=False)
 def ohlcv(ticker, period="max"):
     """Dati OHLCV di un singolo asset per l'analisi tecnica (con cache)."""
     return dati.scarica_ohlcv(ticker, period=period)

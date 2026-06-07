@@ -559,6 +559,46 @@ def isin_strumento(ticker: str) -> str:
     return ""
 
 
+def rendimento_dividendo(ticker: str) -> float:
+    """Stima il **rendimento da dividendo/cedola** annuo (frazione, es. 0.02 = 2%).
+
+    Usa lo storico dividendi degli **ultimi 12 mesi** diviso il prezzo attuale
+    (entrambi in valuta nativa, quindi il rapporto è "pulito"). Gli ETF ad
+    **accumulazione** non distribuiscono → ritorna ~0 (corretto: reinvestono).
+    Fallback ai campi ``yield`` / ``dividendYield`` di yfinance se presenti.
+    """
+    try:
+        tk = yf.Ticker(normalizza_ticker(ticker))
+        div = tk.dividends
+        if div is not None and not div.empty:
+            if isinstance(div.index, pd.DatetimeIndex) and div.index.tz is not None:
+                div = div.copy()
+                div.index = div.index.tz_localize(None)
+            taglio = pd.Timestamp.today().normalize() - pd.Timedelta(days=365)
+            tot = float(div[div.index >= taglio].sum())
+            prezzo = None
+            try:
+                prezzo = float(tk.fast_info.get("lastPrice"))
+            except Exception:
+                prezzo = None
+            if not prezzo:
+                h = tk.history(period="5d", auto_adjust=False)
+                if not h.empty:
+                    prezzo = float(h["Close"].iloc[-1])
+            if prezzo and prezzo > 0 and tot > 0:
+                return tot / prezzo
+        info = tk.get_info()
+        y = info.get("yield")
+        if y:
+            return float(y)
+        dy = info.get("dividendYield")
+        if dy:
+            return float(dy) / 100.0
+    except Exception:
+        pass
+    return 0.0
+
+
 # ---------------------------------------------------------------------------
 # Dati OHLCV per l'analisi tecnica (candele, volumi, medie mobili)
 # ---------------------------------------------------------------------------
