@@ -20,7 +20,8 @@ import metrics as mtr
 
 ss = st.session_state
 
-st.header("🧱 Builder — Costruzione e analisi del portafoglio")
+st.header("🧱 Builder")
+st.caption("Costruzione e analisi del portafoglio.")
 
 # ---------------------------------------------------------------------------
 # Ricerca e selezione asset
@@ -130,6 +131,11 @@ risk_free = ss.risk_free
 nomi = {t: ss.selezionati.set_index("Ticker")["Nome"].get(t, t) for t in tickers_ok}
 nomi_corti = {t: cm.etichetta_corta(nomi[t]) for t in tickers_ok}
 
+# Metriche del portafoglio: calcolate qui (una volta) perché servono sia alla
+# sezione «Portafoglio» sia alla sezione «Ottimizzazione». Con il menu a tendina
+# viene eseguita una sola sezione per volta, quindi met_pf deve essere già pronto.
+met_pf = mtr.metriche_portafoglio(rendimenti, pesi, risk_free)
+
 col1, col2, col3 = st.columns(3)
 col1.metric("Asset analizzati", len(tickers_ok))
 col2.metric("Periodo", f"{prezzi.index.min():%d/%m/%Y} → {prezzi.index.max():%d/%m/%Y}")
@@ -167,15 +173,21 @@ cm.mostra_glossario()
 # Tab di analisi del portafoglio
 # ---------------------------------------------------------------------------
 
-(tab_asset, tab_pf, tab_alloc, tab_timing, tab_pac, tab_obiettivo, tab_costi, tab_div, tab_rib,
- tab_stat, tab_opt, tab_conf) = st.tabs(
-    ["📈 Singoli asset", "💼 Portafoglio", "🌍 Allocazione", "⏱️ Timing", "💶 PAC", "🎯 Obiettivo",
-     "💰 Costi e tasse", "💸 Dividendi", "♻️ Ribilanciamento", "📊 Statistica", "🧮 Ottimizzazione",
-     "🆚 Confronto"]
+SEZIONI = [
+    "📈 Singoli asset", "💼 Portafoglio", "🌍 Allocazione", "⏱️ Timing", "💶 PAC", "🎯 Obiettivo",
+    "💰 Costi e tasse", "💸 Dividendi", "♻️ Ribilanciamento", "📊 Statistica", "🧮 Ottimizzazione",
+    "🆚 Confronto",
+]
+sezione = st.selectbox(
+    "📂 Sezione da visualizzare",
+    SEZIONI,
+    key="sezione_builder",
+    help="Scegli cosa analizzare. Su telefono è più comodo di tante schede affiancate; "
+         "inoltre viene calcolata solo la sezione scelta, quindi è più veloce.",
 )
 
 # === Singoli asset =========================================================
-with tab_asset:
+if sezione == "📈 Singoli asset":
     st.subheader("Metriche per singolo asset")
     met_asset = mtr.metriche_asset(rendimenti, risk_free).rename(index=nomi)
     st.dataframe(cm.formatta_metriche(met_asset), width="stretch")
@@ -194,10 +206,9 @@ with tab_asset:
     st.plotly_chart(fig_dd, width="stretch")
 
 # === Portafoglio ===========================================================
-with tab_pf:
+if sezione == "💼 Portafoglio":
     st.subheader("Metriche del portafoglio")
     st.caption("Pesi normalizzati: " + ", ".join(f"{nomi[t]} {p:.1%}" for t, p in pesi.items()))
-    met_pf = mtr.metriche_portafoglio(rendimenti, pesi, risk_free)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Rend. annuo (CAGR)", f"{met_pf['Rend. annuo (CAGR)']:.2%}",
@@ -302,7 +313,7 @@ with tab_pf:
         )
 
 # === Allocazione ===========================================================
-with tab_alloc:
+if sezione == "🌍 Allocazione":
     st.subheader("Composizione per classe di attività (asset class)")
     st.caption(
         "Recuperata **automaticamente** da Yahoo (azioni / obbligazioni / liquidità). "
@@ -426,7 +437,7 @@ with tab_alloc:
             st.plotly_chart(fig_bar, width="stretch")
 
 # === Timing (rolling returns) =============================================
-with tab_timing:
+if sezione == "⏱️ Timing":
     st.subheader("Quanto avrebbe reso, a seconda di quando avresti investito")
     st.caption(
         "Ogni punto risponde a: «se avessi investito in **questo** giorno e tenuto il "
@@ -493,7 +504,7 @@ with tab_timing:
             )
 
 # === PAC / DCA (backtest storico) =========================================
-with tab_pac:
+if sezione == "💶 PAC":
     st.subheader("Simulatore PAC (versamenti periodici) — backtest storico")
     st.caption(
         "Simula di aver investito una cifra fissa a intervalli regolari **nel passato**, sui dati "
@@ -541,7 +552,7 @@ with tab_pac:
             )
 
 # === Proiezione a obiettivo ================================================
-with tab_obiettivo:
+if sezione == "🎯 Obiettivo":
     st.subheader("Proiezione a obiettivo")
     st.caption(
         "Quanto dovresti versare ogni mese per raggiungere una certa cifra, usando rendimento e "
@@ -601,7 +612,7 @@ with tab_obiettivo:
             st.caption("⚠️ Simulazione statistica (Monte Carlo) su ipotesi storiche: il futuro può essere diverso.")
 
 # === Costi (TER) e fiscalità ==============================================
-with tab_costi:
+if sezione == "💰 Costi e tasse":
     st.subheader("Costi (TER) e fiscalità — stime didattiche")
     st.caption(
         "TER (costo annuo) e **aliquota** fiscale **per singolo asset**. L'aliquota è impostata in "
@@ -659,7 +670,7 @@ with tab_costi:
     st.caption("⚠️ Stima didattica: la fiscalità reale dipende dallo strumento e dalla normativa vigente.")
 
 # === Dividendi / rendita ===================================================
-with tab_div:
+if sezione == "💸 Dividendi":
     st.subheader("Dividendi / rendita stimata")
     st.caption(
         "Stima della **rendita annua da dividendi/cedole** del portafoglio (dati Yahoo). "
@@ -703,7 +714,7 @@ with tab_div:
     )
 
 # === Ribilanciamento vs buy & hold ========================================
-with tab_rib:
+if sezione == "♻️ Ribilanciamento":
     st.subheader("Ribilanciamento vs «compra e tieni»")
     st.caption(
         "Confronta il lasciare il portafoglio com'è (**buy & hold**: i pesi cambiano da soli) "
@@ -740,7 +751,7 @@ with tab_rib:
             )
 
 # === Lettura statistica del portafoglio ===================================
-with tab_stat:
+if sezione == "📊 Statistica":
     st.subheader("Lettura statistica del portafoglio")
     st.caption(
         "Indicatori calcolati **sul portafoglio nel suo insieme**, usando tutto lo storico comune "
@@ -757,7 +768,7 @@ with tab_stat:
         cm.mostra_lettura_statistica(ricchezza_pf, serie_pf_stat, risk_free, chiave="portafoglio")
 
 # === Ottimizzazione ========================================================
-with tab_opt:
+if sezione == "🧮 Ottimizzazione":
     st.subheader("Ottimizzazione del portafoglio")
     if len(tickers_ok) < 2:
         st.info("Servono almeno 2 asset per l'ottimizzazione.")
@@ -891,7 +902,7 @@ with tab_opt:
             st.caption("Installa scipy per visualizzare la frontiera efficiente.")
 
 # === Confronto con indici e portafogli famosi =============================
-with tab_conf:
+if sezione == "🆚 Confronto":
     st.subheader("Confronto con indici e portafogli famosi")
     st.caption(
         "Confronta l'andamento del **tuo** portafoglio con singoli ETF/indici e con allocazioni "

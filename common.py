@@ -421,6 +421,52 @@ def composizione_effettiva(tickers) -> dict:
     return out
 
 
+def inietta_css_mobile():
+    """Inietta CSS «responsive» per migliorare la resa su SMARTPHONE.
+
+    Tutte le regole stanno dentro una media query ``max-width: 640px``: valgono
+    quindi SOLO su schermi piccoli (telefoni), mentre su desktop l'aspetto resta
+    identico a prima. Va chiamata una volta sola da ``app.py``, così vale per
+    entrambe le pagine. L'idea chiave: su telefono le colonne affiancate vanno
+    «a capo» invece di schiacciarsi, e le metriche si dispongono 2 per riga.
+    """
+    st.markdown(
+        """
+        <style>
+        @media (max-width: 640px) {
+            /* Contenuto un po' più in alto e con margini laterali più stretti. */
+            [data-testid="stMainBlockContainer"] {
+                padding-top: 3rem !important;
+                padding-left: 0.8rem !important;
+                padding-right: 0.8rem !important;
+            }
+            /* Titoli più piccoli su telefono, così non occupano troppe righe. */
+            h1 { font-size: 1.7rem !important; line-height: 1.2 !important; }
+            h2 { font-size: 1.35rem !important; }
+            h3 { font-size: 1.15rem !important; }
+
+            /* Le colonne affiancate vanno «a capo» invece di restringersi. */
+            [data-testid="stHorizontalBlock"] { flex-wrap: wrap !important; }
+            /* Default: ogni colonna a tutta larghezza (grafici, ricerca, righe pesi). */
+            [data-testid="stColumn"] { min-width: 100% !important; }
+            /* Eccezione: le colonne con una METRICA vanno 2 per riga (più leggibili). */
+            [data-testid="stColumn"]:has([data-testid="stMetric"]) {
+                min-width: calc(50% - 0.5rem) !important;
+                flex: 1 1 calc(50% - 0.5rem) !important;
+            }
+            /* Numeri ed etichette delle metriche più piccoli, così non si tagliano. */
+            [data-testid="stMetricValue"] { font-size: 1.25rem !important; }
+            [data-testid="stMetricLabel"] { font-size: 0.8rem !important; }
+
+            /* Le tabelle larghe restano scorribili lateralmente (comportamento nativo). */
+            [data-testid="stDataFrame"] { overflow-x: auto !important; }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def mostra_onboarding():
     """Mini guida «come si usa in 3 passi» (espansa solo la prima volta)."""
     espandi = not ss.get("onboarding_visto", False)
@@ -433,7 +479,8 @@ def mostra_onboarding():
             "3. **Approfondisci un singolo asset** nella pagina **📈 Analisi tecnica** "
             "(anche asset non in portafoglio).\n\n"
             "Nella **barra laterale** imposti periodo, orizzonte, valuta e inflazione. "
-            "📱 Da telefono: apri il menu in alto a sinistra e scorri le schede in orizzontale. "
+            "📱 Da telefono: apri il menu **☰** in alto a sinistra per i parametri; nel "
+            "Builder scegli cosa vedere dal menu a tendina **«Sezione»**. "
             "Tutto è a scopo **didattico**, non è consulenza finanziaria."
         )
         ss.onboarding_visto = True

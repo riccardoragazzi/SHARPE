@@ -28,11 +28,14 @@ st.set_page_config(
 # Stato condiviso (portafoglio di esempio, composizione) e parametri comuni.
 cm.init_state()
 
-st.title("📊 Sharpe — Analisi ETF / Indici e Portafoglio")
+# CSS responsive: migliora la resa su smartphone senza toccare il desktop.
+cm.inietta_css_mobile()
+
+st.title("📊 Sharpe")
+st.caption("Analisi di ETF / indici e portafoglio — semplice e didattica.")
 st.caption(
-    "⚠️ Strumento a scopo di **analisi e didattico**. Non costituisce consulenza "
-    "finanziaria né raccomandazione di investimento. I dati provengono da Yahoo "
-    "Finance e possono contenere errori o ritardi."
+    "⚠️ Strumento a scopo di **analisi e didattico**. Non è consulenza finanziaria "
+    "né raccomandazione di investimento. Dati da Yahoo Finance: possibili errori o ritardi."
 )
 
 # Mini guida iniziale (espansa solo la prima volta).
