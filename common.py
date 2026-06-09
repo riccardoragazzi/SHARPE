@@ -535,6 +535,150 @@ def mostra_glossario():
         )
 
 
+def risposta_assistente(domanda: str, dati: dict) -> str:
+    """Aiutante guidato SENZA AI esterna (nessuna chiave, nessuna rete).
+
+    Funzione **pura**: abbina la ``domanda`` per parole chiave a una risposta
+    didattica in italiano, costruita dai numeri **già calcolati** passati in
+    ``dati`` (met_pf, riepilogo, indici di diversificazione, asset che pesa di
+    più sul rischio...). Non dà MAI consigli di investimento.
+    """
+    d = (domanda or "").lower().strip()
+    met = dati.get("met_pf", {}) or {}
+    riep = dati.get("riep", {}) or {}
+
+    def _num(chiave, fmt):
+        v = met.get(chiave)
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return "n/d"
+        return fmt.format(v)
+
+    # --- Guardrail: niente consigli di investimento ---
+    parole_consiglio = ("conviene", "compro", "comprare", "vendo", "vendere", "investo",
+                        "investire", "consigli", "consiglio", "cosa compro", "su cosa punto",
+                        "dove investo", "devo comprare", "devo vendere")
+    if any(p in d for p in parole_consiglio):
+        return (
+            "Non posso darti **consigli di investimento** né dirti cosa comprare o vendere: "
+            "Sharpe è uno strumento **didattico**. Posso però spiegarti i **tuoi numeri** (rischio, "
+            "diversificazione, Sharpe…), così decidi in autonomia. Prova: *«com'è il mio rischio?»* "
+            "oppure *«quanto sono diversificato?»*."
+        )
+
+    # --- Quale asset pesa di più sul rischio (prima di "rischio" generico) ---
+    if "pesa" in d or "contribut" in d or ("asset" in d and "rischio" in d):
+        nome = dati.get("top_rischio_nome")
+        quota = dati.get("top_rischio_quota")
+        if nome and quota is not None:
+            return (
+                f"L'asset che incide di più sul rischio è **{nome}**, responsabile di circa "
+                f"**{quota:.0%}** della volatilità del portafoglio. Se una sola voce pesa molto, il "
+                "portafoglio è **concentrato**: vedi *Contributo al rischio* nella sezione **💼 Portafoglio**."
+            )
+
+    # --- Diversificazione (geografica + settoriale) ---
+    if any(k in d for k in ("diversif", "concentr", "paesi", "paese", "settor", "geografic", "distribu")):
+        dp = dati.get("div_paese", {}) or {}
+        dse = dati.get("div_settore", {}) or {}
+        righe = [
+            f"**Diversificazione complessiva**: {riep.get('diversificazione', 'n/d')} "
+            f"(su {dati.get('n_asset', '?')} asset)."
+        ]
+        if dp.get("valido"):
+            righe.append(
+                f"- 🌍 **Geografica**: {dp['livello']} ({dp['punteggio']}/100). "
+                f"Quota principale **{dp['top_categoria']} {dp['top_peso']:.0%}**, "
+                f"≈ {dp['numero_effettivo']:.1f} aree."
+            )
+        if dse.get("valido"):
+            righe.append(
+                f"- 🏭 **Settoriale**: {dse['livello']} ({dse['punteggio']}/100). "
+                f"Quota principale **{dse['top_categoria']} {dse['top_peso']:.0%}**, "
+                f"≈ {dse['numero_effettivo']:.1f} settori."
+            )
+        if not dp.get("valido") and not dse.get("valido"):
+            righe.append("_Composizione per paese/settore non disponibile per questi asset._")
+        righe.append(
+            "\nPiù alto il punteggio, meno dipendi da un singolo paese/settore. "
+            "Dettagli e grafici nella sezione **🌍 Allocazione**."
+        )
+        return "\n".join(righe)
+
+    # --- Rischio / volatilità ---
+    if "rischio" in d or "volatil" in d or "oscilla" in d:
+        return (
+            f"Il tuo rischio è **{riep.get('rischio', 'n/d')}**: la **volatilità annua** è "
+            f"**{_num('Volatilità annua (covarianza)', '{:.1%}')}** "
+            "(sotto 8% = basso, 8–15% = medio, oltre 15% = alto). La perdita massima storica "
+            f"(max drawdown) è stata **{_num('Max drawdown', '{:.1%}')}**. La volatilità misura "
+            "**quanto oscilla** il valore: più è alta, più sali e scendi nel tempo."
+        )
+
+    # --- Metriche specifiche ---
+    if "sharpe" in d:
+        return (
+            "**Sharpe** = rendimento ottenuto per ogni unità di rischio (oltre il risk-free). "
+            "Indicativo: >1 buono, >2 ottimo, <0 il rischio non è stato ripagato. "
+            f"Il tuo è **{_num('Sharpe', '{:.2f}')}**."
+        )
+    if "sortino" in d:
+        return (
+            "**Sortino** = come lo Sharpe, ma conta solo le oscillazioni **verso il basso** "
+            f"(le perdite). Più alto è meglio. Il tuo è **{_num('Sortino', '{:.2f}')}**."
+        )
+    if "drawdown" in d or "perdita massima" in d:
+        return (
+            "**Max drawdown** = la perdita massima dal punto più alto a quello più basso "
+            "(es. −30% = a un certo punto avresti perso il 30% dal picco). Più vicino a 0 è meglio. "
+            f"Il tuo è **{_num('Max drawdown', '{:.1%}')}**."
+        )
+    if "cagr" in d or "rendiment" in d or "guadagn" in d:
+        return (
+            "**Rendimento annuo (CAGR)** = quanto è cresciuto in media ogni anno. Il tuo è "
+            f"**{_num('Rend. annuo (CAGR)', '{:.1%}')}**; il rendimento **cumulato** nel periodo è "
+            f"**{_num('Rend. cumulato', '{:.1%}')}**. Va sempre letto **insieme al rischio**."
+        )
+
+    # --- Sezioni specifiche dell'app ---
+    if "pac" in d:
+        return ("Il **💶 PAC** simula versamenti periodici (es. ogni mese) e li confronta con un "
+                "investimento unico. Apri la sezione **💶 PAC** dal menu in alto.")
+    if "obiettiv" in d:
+        return ("La sezione **🎯 Obiettivo** stima quanto versare per raggiungere una cifra, con la "
+                "probabilità che scegli tu (simulazione Monte Carlo).")
+    if "costi" in d or "tass" in d:
+        return ("In **💰 Costi e tasse** vedi l'impatto di TER e tasse (capital gain, bollo) sul "
+                "rendimento nel tempo.")
+    if "dividend" in d:
+        return ("In **💸 Dividendi** vedi la rendita lorda/netta stimata dei tuoi ETF a distribuzione.")
+    if "ribilanc" in d:
+        return ("In **♻️ Ribilanciamento** confronti il mantenere i pesi costanti (ribilanciando) col "
+                "lasciarli correre (buy & hold).")
+    if "ottimizz" in d:
+        return ("In **🧮 Ottimizzazione** vedi pesi «ottimali» secondo vari criteri (minima varianza, "
+                "max Sharpe…). ⚠️ Si basa sul **passato**: non garantisce il futuro.")
+
+    # --- Guida generale / "cosa sai fare" ---
+    if any(k in d for k in ("come funziona", "come uso", "come si usa", "guida", "aiuto",
+                            "cosa puoi", "cosa sai", "aiutami", "ciao")):
+        return (
+            "Posso aiutarti così:\n"
+            "- **«Quanto sono diversificato?»** — geografica e settoriale.\n"
+            "- **«Com'è il mio rischio?»** — volatilità e perdita massima.\n"
+            "- **«Cosa significa Sharpe / Sortino / CAGR / drawdown?»** — più il tuo valore.\n"
+            "- **«Quale asset pesa di più sul rischio?»**\n\n"
+            "Per costruire il portafoglio usa **💼 Portafoglio**; per i piani **💶 PAC** e **🎯 Obiettivo**; "
+            "per paesi/settori **🌍 Allocazione**. Cambi sezione dal menu **«📂 Sezione»** in alto."
+        )
+
+    # --- Fallback ---
+    return (
+        "Non sono sicuro di aver capito 🤔. Posso parlarti di: **diversificazione**, **rischio**, "
+        "**Sharpe / Sortino / CAGR / drawdown**, **quale asset pesa di più sul rischio** e **come si usa "
+        "l'app**. Prova con una di queste, oppure clicca una *domanda rapida*."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Componente UI: "lettura statistica" (semaforo + indicatori)
 # ---------------------------------------------------------------------------

@@ -635,6 +635,47 @@ def coppie_sovrapposte(distribuzioni: dict[str, dict[str, float]], soglia: float
     return coppie
 
 
+def indice_diversificazione(serie: "pd.Series") -> dict:
+    """Misura quanto è diversificata una ripartizione (es. per paese o settore).
+
+    ``serie`` = pesi per categoria (tipicamente l'output di ``aggrega_composizione``).
+    Calcola l'indice di **Herfindahl** (HHI = somma dei pesi al quadrato), il
+    **numero effettivo** di categorie (1/HHI), la categoria/quota principale, un
+    **punteggio 0–100** (100 = molto distribuito) e un **livello** testuale
+    (``buona`` / ``media`` / ``bassa``).
+
+    Restituisce un dict; se la serie è vuota o tutta a zero, ``{"valido": False}``.
+    """
+    s = pd.Series(serie, dtype="float64")
+    s = s[s > 0]
+    if s.empty:
+        return {"valido": False}
+    w = s / s.sum()
+    hhi = float((w ** 2).sum())
+    numero_effettivo = float(1.0 / hhi) if hhi > 0 else float(len(w))
+    top_categoria = str(w.idxmax())
+    top_peso = float(w.max())
+    punteggio = int(round(max(0.0, min(1.0, 1.0 - hhi)) * 100))
+
+    if top_peso < 0.35 and numero_effettivo >= 5:
+        livello = "buona"
+    elif top_peso < 0.55 and numero_effettivo >= 3:
+        livello = "media"
+    else:
+        livello = "bassa"
+
+    return {
+        "valido": True,
+        "hhi": hhi,
+        "numero_effettivo": numero_effettivo,
+        "top_categoria": top_categoria,
+        "top_peso": top_peso,
+        "punteggio": punteggio,
+        "livello": livello,
+        "n_categorie": int(len(w)),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Extra: minima varianza e frontiera efficiente
 # ---------------------------------------------------------------------------
@@ -873,6 +914,50 @@ def pesi_risk_parity(rendimenti: pd.DataFrame, peso_max: float = 1.0) -> pd.Seri
     return pd.Series(w / w.sum(), index=colonne)
 
 
+def pesi_massima_diversificazione(
+    rendimenti: pd.DataFrame, long_only: bool = True, frazione_minima: float = 0.0,
+    peso_max: float = 1.0,
+) -> pd.Series:
+    """Pesi a **massima diversificazione** (Most Diversified Portfolio).
+
+    Massimizza il «diversification ratio» DR(w) = (wᵀσ) / √(wᵀ Σ w), dove σ è il
+    vettore delle volatilità annue dei singoli asset e Σ la covarianza annua. DR è
+    alto quando il portafoglio sfrutta al meglio asset **poco correlati**: è quindi
+    il modo "vero" di **massimizzare la decorrelazione**. Vincoli L ≤ w ≤
+    ``peso_max`` e Σw = 1 (in long-only). Usa scipy; senza scipy ripiega su un
+    proxy inverse-volatility.
+    """
+    colonne = list(rendimenti.columns)
+    n = len(colonne)
+    sigma = matrice_covarianza_annua(rendimenti).values
+    vol = np.sqrt(np.clip(np.diag(sigma), 0.0, None))  # volatilità annua per asset
+    lo, hi = _limiti_peso(frazione_minima, n, long_only, peso_max)
+
+    if long_only and n * lo >= 1.0 - 1e-9:
+        return pd.Series(1.0 / n, index=colonne)
+
+    if not SCIPY_DISPONIBILE:
+        # Proxy: inverse-volatility (in mancanza dell'ottimizzatore).
+        with np.errstate(divide="ignore"):
+            w = np.where(vol > 0, 1.0 / vol, 0.0)
+        somma = w.sum()
+        w = w / somma if somma > 0 else np.full(n, 1.0 / n)
+        return pd.Series(w, index=colonne)
+
+    def neg_dr(w):
+        wv = float(w @ vol)
+        pv = float(np.sqrt(max(w @ sigma @ w, 1e-12)))
+        return -wv / pv if pv > 0 else 0.0
+
+    vincoli = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}]
+    limiti = [(lo, hi)] * n
+    w0 = np.full(n, 1.0 / n)
+    res = minimize(neg_dr, w0, method="SLSQP", bounds=limiti, constraints=vincoli,
+                   options={"maxiter": 500, "ftol": 1e-12})
+    w = res.x if res.success else w0
+    return pd.Series(w, index=colonne)
+
+
 def pesi_ottimizzati(
     rendimenti: pd.DataFrame,
     obiettivo: str,
@@ -883,7 +968,7 @@ def pesi_ottimizzati(
 ) -> pd.Series:
     """Dispatcher: restituisce i pesi ottimali per l'obiettivo scelto.
 
-    ``obiettivo`` ∈ {"min_var", "max_ret", "max_sharpe", "risk_parity"}.
+    ``obiettivo`` ∈ {"min_var", "max_ret", "max_sharpe", "risk_parity", "max_decorr"}.
     ``frazione_minima`` = quota minima per asset (α in L = α·(1/N)); ``peso_max`` =
     cap massimo per asset (frazione).
     """
@@ -895,6 +980,8 @@ def pesi_ottimizzati(
         return pesi_massimo_sharpe(rendimenti, risk_free, long_only, frazione_minima, peso_max)
     if obiettivo == "risk_parity":
         return pesi_risk_parity(rendimenti, peso_max)
+    if obiettivo == "max_decorr":
+        return pesi_massima_diversificazione(rendimenti, long_only, frazione_minima, peso_max)
     raise ValueError(f"Obiettivo non riconosciuto: {obiettivo}")
 
 

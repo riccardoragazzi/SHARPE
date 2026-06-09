@@ -181,7 +181,7 @@ cm.mostra_glossario()
 SEZIONI = [
     "📈 Singoli asset", "💼 Portafoglio", "🌍 Allocazione", "⏱️ Timing", "💶 PAC", "🎯 Obiettivo",
     "💰 Costi e tasse", "💸 Dividendi", "♻️ Ribilanciamento", "📊 Statistica", "🧮 Ottimizzazione",
-    "🆚 Confronto",
+    "🆚 Confronto", "🤖 Assistente",
 ]
 sezione = st.selectbox(
     "📂 Sezione da visualizzare",
@@ -416,9 +416,41 @@ if sezione == "🌍 Allocazione":
             "tenerli entrambi aggiunge poca diversificazione."
         )
 
+    # Aggregazione unica per paese e settore (riusata per verdetto e grafici).
+    agg = {t: mtr.aggrega_composizione(pesi, comp_eff, t) for t in ("paese", "settore")}
+
+    # --- Verdetto di diversificazione (geografica e settoriale) ---
+    st.subheader("🧭 Quanto sei diversificato?")
+    st.caption(
+        "Sintesi di quanto il portafoglio è distribuito tra **aree geografiche** e **settori**. "
+        "Più alto il punteggio, **meno dipendi** da un singolo paese o settore."
+    )
+    cdiv = st.columns(2)
+    for col, t, etichetta, parola in (
+        (cdiv[0], "paese", "🌍 Geografica", "aree"),
+        (cdiv[1], "settore", "🏭 Settoriale", "settori"),
+    ):
+        info = mtr.indice_diversificazione(agg[t][0])
+        with col:
+            if not info["valido"]:
+                st.markdown(f"**{etichetta}**")
+                st.caption("Composizione non disponibile per questi asset.")
+                continue
+            _emoji = {"buona": "🟢", "media": "🟡", "bassa": "🔴"}[info["livello"]]
+            st.markdown(
+                f"**{etichetta}** — {_emoji} diversificazione **{info['livello']}** "
+                f"(**{info['punteggio']}/100**)"
+            )
+            st.markdown(
+                f"Quota principale: **{info['top_categoria']} {info['top_peso']:.0%}**.  \n"
+                f"≈ **{info['numero_effettivo']:.1f} {parola}** ben distribuiti "
+                f"(su {info['n_categorie']} presenti)."
+            )
+    st.divider()
+
     for tipo, titolo in (("paese", "Distribuzione per paese"), ("settore", "Distribuzione per settore")):
         st.subheader(titolo)
-        serie, mancanti = mtr.aggrega_composizione(pesi, comp_eff, tipo)
+        serie, mancanti = agg[tipo]
         if mancanti:
             st.caption(
                 f"Composizione **{tipo}** non disponibile per: "
@@ -781,6 +813,7 @@ if sezione == "🧮 Ottimizzazione":
         OBIETTIVI = {
             "Minima varianza (minimo rischio)": "min_var",
             "Risk parity (parità di rischio)": "risk_parity",
+            "Massima diversificazione (decorrelazione)": "max_decorr",
             "Massimo indice di Sharpe (tangenza)": "max_sharpe",
             "Massimo rendimento annuo": "max_ret",
         }
@@ -788,7 +821,8 @@ if sezione == "🧮 Ottimizzazione":
         scelta = col_ob.selectbox(
             "Obiettivo", list(OBIETTIVI.keys()), index=0,
             help="Minima varianza = minor rischio. Risk parity = ogni asset contribuisce ugualmente "
-                 "al rischio. Max Sharpe = miglior rendimento/rischio storico. Max rendimento = solo rendimento.")
+                 "al rischio. Massima diversificazione = sfrutta al meglio gli asset poco correlati. "
+                 "Max Sharpe = miglior rendimento/rischio storico. Max rendimento = solo rendimento.")
         obiettivo = OBIETTIVI[scelta]
         long_only = col_lo.checkbox("Solo posizioni long (pesi ≥ 0)", value=True,
                                     help="Lascia attivo: niente vendite allo scoperto.")
@@ -799,6 +833,14 @@ if sezione == "🧮 Ottimizzazione":
                 "portafoglio su pochi asset che sono andati bene in passato — cosa che non si ripete "
                 "uguale. Per il **lungo periodo** sono di solito più robuste **Minima varianza** o "
                 "**Risk parity**."
+            )
+        if obiettivo == "max_decorr":
+            st.info(
+                "La **massima diversificazione** sceglie i pesi che sfruttano meglio la "
+                "**decorrelazione** tra gli asset: massimizza il «diversification ratio» = media "
+                "(pesata) delle volatilità dei singoli **÷** volatilità del portafoglio. Tende a "
+                "distribuire su asset **poco correlati**. ⚠️ Si basa sulle **correlazioni storiche**, "
+                "che possono cambiare nel tempo."
             )
         if not mtr.SCIPY_DISPONIBILE:
             st.caption("scipy non disponibile: si usano soluzioni analitiche (possono dare pesi negativi).")
@@ -974,3 +1016,72 @@ if sezione == "🆚 Confronto":
             "leggermente dalle versioni «originali». ⚠️ Analisi storica a scopo didattico, "
             "non un consiglio di investimento."
         )
+
+# === Assistente guidato (senza AI esterna, nessuna chiave) =================
+if sezione == "🤖 Assistente":
+    st.subheader("🤖 Assistente")
+    st.caption(
+        "ℹ️ Ti spiego l'app e i **tuoi numeri** a scopo **didattico**. Non do consigli di "
+        "investimento. (Gratuito, nessun account: rispondo usando i dati già calcolati.)"
+    )
+
+    # Contesto per le risposte: numeri già calcolati + diversificazione geo/settore.
+    comp_eff_a = cm.composizione_effettiva(tickers_ok)
+    div_paese = mtr.indice_diversificazione(mtr.aggrega_composizione(pesi, comp_eff_a, "paese")[0])
+    div_settore = mtr.indice_diversificazione(mtr.aggrega_composizione(pesi, comp_eff_a, "settore")[0])
+    rc_ass = mtr.contributo_rischio(rendimenti, pesi)
+    if len(rc_ass) and "Contributo %" in rc_ass:
+        _top_t = rc_ass["Contributo %"].idxmax()
+        top_rischio_nome = nomi.get(_top_t, _top_t)
+        top_rischio_quota = float(rc_ass["Contributo %"].max())
+    else:
+        top_rischio_nome, top_rischio_quota = None, None
+
+    dati_ass = {
+        "met_pf": met_pf,
+        "riep": riep,
+        "n_asset": len(tickers_ok),
+        "div_paese": div_paese,
+        "div_settore": div_settore,
+        "top_rischio_nome": top_rischio_nome,
+        "top_rischio_quota": top_rischio_quota,
+    }
+
+    # Cronologia della conversazione (in session_state).
+    if "chat_ass" not in ss:
+        ss.chat_ass = [(
+            "assistant",
+            "Ciao! 👋 Sono il tuo assistente. Posso spiegarti l'app e i **tuoi numeri** "
+            "(rischio, diversificazione, Sharpe…). Scegli una domanda rapida o scrivimi sotto.",
+        )]
+
+    # Domande rapide (pulsanti).
+    st.markdown("**Domande rapide:**")
+    suggerite = [
+        "Quanto sono diversificato?",
+        "Com'è il mio rischio?",
+        "Cosa significa Sharpe?",
+        "Quale asset pesa di più sul rischio?",
+        "Come funziona l'app?",
+        "Cosa significa il max drawdown?",
+    ]
+    cols_s = st.columns(2)
+    for _i, _q in enumerate(suggerite):
+        if cols_s[_i % 2].button(_q, key=f"sugg_{_i}", width="stretch"):
+            ss.chat_ass.append(("user", _q))
+            ss.chat_ass.append(("assistant", cm.risposta_assistente(_q, dati_ass)))
+
+    # Input libero.
+    _libera = st.chat_input("Scrivi una domanda… (es. «cos'è il drawdown?»)")
+    if _libera:
+        ss.chat_ass.append(("user", _libera))
+        ss.chat_ass.append(("assistant", cm.risposta_assistente(_libera, dati_ass)))
+
+    # Pulisci (prima del rendering, così l'effetto è immediato).
+    if len(ss.chat_ass) > 1 and st.button("🧹 Pulisci conversazione"):
+        ss.chat_ass = [("assistant", "Conversazione azzerata. Chiedimi pure! 🙂")]
+
+    # Conversazione.
+    for _ruolo, _testo in ss.chat_ass:
+        with st.chat_message(_ruolo, avatar="🤖" if _ruolo == "assistant" else "🧑"):
+            st.markdown(_testo)
