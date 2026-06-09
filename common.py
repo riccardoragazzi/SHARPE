@@ -467,6 +467,36 @@ def inietta_css_mobile():
     )
 
 
+def mostra_descrizione_app():
+    """Descrizione sintetica dell'app: cos'è e cosa puoi farci.
+
+    Serve a tre scopi insieme: (1) chi arriva la prima volta capisce subito l'app;
+    (2) un'AI con navigazione che apre il link coglie al volo di cosa si tratta e
+    può dare un parere sensato; (3) Google usa questo testo in cima come descrizione
+    nei risultati di ricerca. Espansa al primo accesso, poi richiudibile.
+    """
+    espandi = not ss.get("descrizione_vista", False)
+    with st.expander("ℹ️ Cos'è Sharpe e cosa puoi fare", expanded=espandi):
+        st.markdown(
+            "**Sharpe** è un'app gratuita e **didattica** per analizzare **ETF e indici** e "
+            "costruire un **portafoglio** di lungo periodo (pensata per investitori passivi). "
+            "Tutto in italiano, con ogni metrica spiegata in parole semplici.\n\n"
+            "**Cosa puoi fare:**\n"
+            "- 🔎 **Cercare** ETF/indici per nome, ticker o ISIN e comporre un portafoglio "
+            "(o partire da **portafogli pronti**).\n"
+            "- 📊 **Misurare rischio e rendimento**: CAGR, volatilità, **Sharpe**, Sortino, "
+            "max drawdown, correlazioni, contributo al rischio.\n"
+            "- 🌍 **Diversificazione** per asset class, **paese** e **settore**, con avvisi "
+            "sulle sovrapposizioni.\n"
+            "- 💶 **PAC** (versamenti periodici), 🎯 **Obiettivo** di capitale (proiezioni "
+            "Monte Carlo), 💰 **costi e tasse**, 💸 **dividendi**, ♻️ **ribilanciamento**, "
+            "🧮 **ottimizzazione**.\n"
+            "- 📈 **Analisi tecnica** di qualunque asset: candele, volumi, medie mobili, RSI.\n\n"
+            "⚠️ Strumento di **analisi/educativo**: non è consulenza finanziaria. Dati da Yahoo Finance."
+        )
+        ss.descrizione_vista = True
+
+
 def mostra_onboarding():
     """Mini guida «come si usa in 3 passi» (espansa solo la prima volta)."""
     espandi = not ss.get("onboarding_visto", False)
@@ -559,7 +589,10 @@ def mostra_semaforo_mercato():
     """
     close, usato = None, None
     for b in BENCHMARK_MERCATO:
-        full = ohlcv(b, "max")
+        # Finestra ampia ma fissa (10 anni): basta a SMA 200gg, momentum 126gg e
+        # mediana della volatilità, ed evita di scaricare tutto lo storico "max"
+        # (che rallentava il primo disegno della pagina).
+        full = ohlcv(b, "10y")
         if not full.empty and "Close" in full.columns and len(full["Close"].dropna()) > 30:
             close, usato = full["Close"], b
             break

@@ -109,7 +109,8 @@ pesi_input = pd.Series([pesi_correnti[t] for t in tickers], index=tickers)
 # Download dati e calcoli
 # ---------------------------------------------------------------------------
 
-with st.spinner("⏳ Scarico i dati di mercato (può richiedere qualche secondo la prima volta)..."):
+with st.spinner("⏳ Sto scaricando i dati di mercato dei tuoi ETF da Yahoo Finance… "
+                "al primo avvio può richiedere qualche secondo."):
     ris = cm.carica_dati(
         tuple(tickers), ss.period, ss.data_inizio, ss.data_fine, ss.valuta_base, ss.converti
     )
@@ -119,7 +120,11 @@ if ris.errori:
         st.warning(f"**{t}**: {msg}")
 
 if ris.prezzi.empty:
-    st.error("Nessun dato disponibile per gli asset indicati. Controlla i simboli e l'intervallo.")
+    st.error(
+        "Nessun dato disponibile per gli asset indicati. Controlla i simboli e l'intervallo "
+        "nella barra laterale. Se hai appena aperto l'app, attendi qualche secondo e riprova "
+        "(i dati arrivano da Yahoo Finance)."
+    )
     st.stop()
 
 prezzi = ris.prezzi

@@ -32,7 +32,14 @@ cm.init_state()
 cm.inietta_css_mobile()
 
 st.title("📊 Sharpe")
-st.caption("Analisi di ETF / indici e portafoglio — semplice e didattica.")
+st.caption(
+    "Analizza **ETF e indici**, costruisci un **portafoglio** e studia rischio, rendimento e "
+    "diversificazione — semplice, in italiano e **didattico**."
+)
+
+# Descrizione «cos'è e cosa puoi fare» (utile a nuovi utenti, AI e indicizzazione Google).
+cm.mostra_descrizione_app()
+
 st.caption(
     "⚠️ Strumento a scopo di **analisi e didattico**. Non è consulenza finanziaria "
     "né raccomandazione di investimento. Dati da Yahoo Finance: possibili errori o ritardi."
