@@ -262,11 +262,22 @@ def cb_cerca():
     ss.risultati = cerca(ss.get("query", ""))
 
 
+def _peso_default_nuovo(n_attuali: int) -> float:
+    """Peso di default (quota equa %) per un asset appena aggiunto.
+
+    Evita che i nuovi asset partano da 0% (e quindi vengano ignorati nell'analisi):
+    con n asset già presenti, il nuovo riceve 100/(n+1)%. Es. con 19 asset già
+    presenti il 20° entra al 5%.
+    """
+    return round(100.0 / (max(int(n_attuali), 0) + 1), 2)
+
+
 def cb_aggiungi(symbol: str, nome: str):
     """Aggiunge uno strumento al portafoglio se non già presente."""
     symbol = dati.normalizza_ticker(symbol)
     if symbol and symbol not in ss.selezionati["Ticker"].values:
-        nuova = pd.DataFrame([{"Ticker": symbol, "Nome": nome, "Peso %": 0.0}])
+        peso_nuovo = _peso_default_nuovo(len(ss.selezionati))
+        nuova = pd.DataFrame([{"Ticker": symbol, "Nome": nome, "Peso %": peso_nuovo}])
         ss.selezionati = pd.concat([ss.selezionati, nuova], ignore_index=True)
 
 
