@@ -676,6 +676,37 @@ def indice_diversificazione(serie: "pd.Series") -> dict:
     }
 
 
+def diagnostica_periodo_comune(finestre: dict) -> dict:
+    """Analizza le finestre di date per asset per spiegare un periodo comune vuoto.
+
+    ``finestre`` = {ticker: (prima_data, ultima_data, n_osservazioni)} (output di
+    ``scarica_prezzi``). Calcola il periodo comune a tutti gli asset e individua i
+    "colpevoli": l'asset che **inizia più tardi** e quello che **finisce prima**.
+
+    Restituisce un dict; se non ci sono finestre valide, ``{"valido": False}``.
+    """
+    voci = [
+        (t, p, u, n) for t, (p, u, n) in finestre.items()
+        if p is not None and u is not None and pd.notna(p) and pd.notna(u)
+    ]
+    if not voci:
+        return {"valido": False}
+
+    inizio_comune = max(v[1] for v in voci)
+    fine_comune = min(v[2] for v in voci)
+    colpevole_inizio = max(voci, key=lambda v: v[1])[0]  # parte più tardi
+    colpevole_fine = min(voci, key=lambda v: v[2])[0]    # finisce prima
+    return {
+        "valido": True,
+        "inizio_comune": inizio_comune,
+        "fine_comune": fine_comune,
+        "sovrapposizione": inizio_comune <= fine_comune,
+        "colpevole_inizio": colpevole_inizio,
+        "colpevole_fine": colpevole_fine,
+        "voci": sorted(voci, key=lambda v: v[1]),  # ordinati per data d'inizio
+    }
+
+
 # ---------------------------------------------------------------------------
 # Extra: minima varianza e frontiera efficiente
 # ---------------------------------------------------------------------------

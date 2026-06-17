@@ -65,12 +65,18 @@ class RisultatoDownload:
     valuta_base:
         Valuta in cui sono espressi i prezzi nel DataFrame ``prezzi``.
         Coincide con le valute native se la conversione è disattivata.
+    finestre:
+        Mappa ticker -> ``(prima_data, ultima_data, n_osservazioni)`` dello storico
+        scaricato da Yahoo per ciascun asset, PRIMA dell'allineamento al periodo
+        comune. Serve a diagnosticare perché manca un periodo comune (es. un asset
+        che inizia troppo tardi o finisce nel passato).
     """
 
     prezzi: pd.DataFrame
     valute: dict[str, str] = field(default_factory=dict)
     errori: dict[str, str] = field(default_factory=dict)
     valuta_base: str | None = None
+    finestre: dict = field(default_factory=dict)
 
 
 def normalizza_ticker(ticker: str) -> str:
@@ -190,14 +196,22 @@ def scarica_prezzi(
         except Exception as exc:  # rete, ticker malformato, ecc.
             errori[t] = f"Errore nel download: {exc}"
 
+    # Finestre per asset (catturate PRIMA dell'allineamento, così restano
+    # disponibili per la diagnostica anche se il periodo comune risulta vuoto).
+    finestre = {
+        t: (s.index.min(), s.index.max(), int(len(s)))
+        for t, s in series.items()
+    }
+
     if not series:
-        return RisultatoDownload(prezzi=pd.DataFrame(), valute=valute, errori=errori)
+        return RisultatoDownload(prezzi=pd.DataFrame(), valute=valute, errori=errori,
+                                 finestre=finestre)
 
     # Concatena le serie in un unico DataFrame e allinea le date.
     prezzi = pd.concat(series, axis=1)
     prezzi = allinea_prezzi(prezzi)
 
-    return RisultatoDownload(prezzi=prezzi, valute=valute, errori=errori)
+    return RisultatoDownload(prezzi=prezzi, valute=valute, errori=errori, finestre=finestre)
 
 
 def controlla_qualita(prezzi: pd.DataFrame) -> list[tuple[str, str]]:
@@ -353,6 +367,7 @@ def converti_in_base(
         valute=risultato.valute,
         errori=errori,
         valuta_base=valuta_base,
+        finestre=risultato.finestre,
     )
 
 

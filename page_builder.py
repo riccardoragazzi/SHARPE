@@ -120,10 +120,38 @@ if ris.errori:
         st.warning(f"**{t}**: {msg}")
 
 if ris.prezzi.empty:
-    st.error(
-        "Nessun dato disponibile per gli asset indicati. Controlla i simboli e l'intervallo "
-        "nella barra laterale. Se hai appena aperto l'app, attendi qualche secondo e riprova "
-        "(i dati arrivano da Yahoo Finance)."
+    st.error("Nessun dato disponibile per il **periodo comune** a tutti gli asset selezionati.")
+    nome_di = ss.selezionati.set_index("Ticker")["Nome"].to_dict()
+    diag = mtr.diagnostica_periodo_comune(ris.finestre)
+    if diag.get("valido"):
+        if not diag["sovrapposizione"]:
+            ci, cf = diag["colpevole_inizio"], diag["colpevole_fine"]
+            st.warning(
+                "❌ Gli asset **non hanno un periodo storico in comune**. "
+                f"**{nome_di.get(ci, ci)}** (`{ci}`) ha dati che iniziano solo il "
+                f"**{diag['inizio_comune']:%d/%m/%Y}**, ma **{nome_di.get(cf, cf)}** (`{cf}`) "
+                f"finisce già il **{diag['fine_comune']:%d/%m/%Y}**: non c'è sovrapposizione. "
+                "Prova a **rimuovere uno dei due** (spesso il colpevole è un ETF di nicchia con "
+                "storico scarso o non aggiornato su Yahoo)."
+            )
+        else:
+            st.warning(
+                "Gli asset si sovrappongono nel tempo, ma dopo l'allineamento non resta nulla: può "
+                f"dipendere dalla **conversione valuta** o da uno storico molto corto. Prova a "
+                f"disattivare «Converti tutto in {ss.valuta_base}» nella barra laterale, oppure ad "
+                "accorciare il periodo."
+            )
+        righe_fin = [
+            {"Asset": nome_di.get(t, t), "Ticker": t,
+             "Inizio": f"{p:%d/%m/%Y}", "Fine": f"{u:%d/%m/%Y}", "Giorni": n}
+            for t, p, u, n in diag["voci"]
+        ]
+        st.markdown("**Storico disponibile su Yahoo per ciascun asset** (ordinato per data d'inizio):")
+        st.dataframe(pd.DataFrame(righe_fin), width="stretch", hide_index=True)
+    st.caption(
+        "💡 Consigli: aggiungi gli asset **pochi alla volta** per scoprire il colpevole; per gli ETF "
+        "di nicchia prova il simbolo **.MI** (Milano), **.L** (Londra) o cerca per **ISIN**; in barra "
+        "laterale puoi **accorciare il periodo**."
     )
     st.stop()
 
@@ -148,6 +176,20 @@ col3.metric("Valuta", ss.valuta_base if ss.converti else "nativa (mista)")
 if ris.valute:
     valute_txt = ", ".join(f"{nomi.get(t, t)}: {c}" for t, c in ris.valute.items())
     st.caption(f"Valute native rilevate — {valute_txt}")
+
+with st.expander("📅 Storico disponibile per asset (e periodo comune usato)"):
+    _diag = mtr.diagnostica_periodo_comune(ris.finestre)
+    if _diag.get("valido"):
+        _righe = [
+            {"Asset": nomi.get(t, t), "Ticker": t,
+             "Inizio": f"{p:%d/%m/%Y}", "Fine": f"{u:%d/%m/%Y}", "Giorni": n}
+            for t, p, u, n in _diag["voci"]
+        ]
+        st.dataframe(pd.DataFrame(_righe), width="stretch", hide_index=True)
+    st.caption(
+        "Il portafoglio usa il **periodo comune a tutti** gli asset: quello con lo storico più corto "
+        "(o che parte più tardi) limita il periodo analizzato per gli altri."
+    )
 
 # Avvisi sulla qualità dei dati (storico corto, buchi, anomalie).
 cm.mostra_avvisi_qualita(prezzi)
