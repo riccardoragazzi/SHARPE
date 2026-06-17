@@ -245,6 +245,15 @@ def controlla_qualita(prezzi: pd.DataFrame) -> list[tuple[str, str]]:
             f"{n_anomalie} variazione/i giornaliera/e anomala/e (oltre ±40%): "
             "possibili errori nei dati di Yahoo Finance, controlla i risultati."))
 
+    # Freschezza: ultima quotazione troppo vecchia (asset delistato/non aggiornato).
+    ultima = prezzi.index.max()
+    giorni_da_ultima = (pd.Timestamp.today().normalize() - ultima).days
+    if giorni_da_ultima > 7:
+        avvisi.append(("warning",
+            f"Dati non aggiornati di recente: l'ultima quotazione disponibile è del "
+            f"{ultima:%d/%m/%Y} (~{giorni_da_ultima} giorni fa). Potrebbe esserci un asset "
+            "delistato o senza aggiornamenti su Yahoo."))
+
     return avvisi
 
 

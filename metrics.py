@@ -137,6 +137,72 @@ def max_drawdown(rendimenti: pd.Series) -> float:
     return float(dd.min())
 
 
+def statistiche_drawdown(serie_rendimenti: pd.Series) -> dict:
+    """Statistiche sui drawdown: oltre al massimo, **quanto a lungo** sei stato in perdita.
+
+    Calcola la perdita massima dal picco, la data del minimo, la durata del periodo
+    «sott'acqua» (sotto il picco precedente) più lungo in mesi, e se al momento sei
+    ancora in perdita e da quanti mesi. Serve a far capire che dopo un calo servono
+    spesso **mesi/anni** per recuperare. Restituisce ``{"valido": False}`` se vuoto.
+    """
+    r = serie_rendimenti.dropna()
+    if r.empty:
+        return {"valido": False}
+    dd = serie_drawdown(r)
+    sotto = dd < -1e-9  # True quando sei sotto il picco precedente
+    idx = dd.index
+
+    durata_max_giorni, inizio_run = 0, None
+    for data, giu in sotto.items():
+        if giu:
+            if inizio_run is None:
+                inizio_run = data
+            durata_max_giorni = max(durata_max_giorni, (data - inizio_run).days)
+        else:
+            inizio_run = None
+
+    in_perdita_ora = bool(sotto.iloc[-1])
+    mesi_perdita_ora = 0.0
+    if in_perdita_ora:
+        i = len(sotto) - 1
+        while i >= 0 and bool(sotto.iloc[i]):
+            i -= 1
+        inizio_corrente = idx[i + 1]
+        mesi_perdita_ora = (idx[-1] - inizio_corrente).days / 30.44
+
+    return {
+        "valido": True,
+        "max_dd": float(dd.min()),
+        "data_minimo": dd.idxmin(),
+        "durata_max_mesi": durata_max_giorni / 30.44,
+        "in_perdita_ora": in_perdita_ora,
+        "mesi_perdita_ora": mesi_perdita_ora,
+    }
+
+
+def costo_perdere_migliori_giorni(serie_rendimenti: pd.Series, n: int = 10) -> dict:
+    """Quanto si perde a restare fuori dai **n giorni migliori** (anti-market-timing).
+
+    Confronta il rendimento cumulato tenendo l'investimento sempre, con quello che
+    si otterrebbe **saltando** i ``n`` giorni di rialzo più forti (messi a 0). Serve
+    a mostrare, in modo didattico, che provare a «entrare/uscire al momento giusto»
+    rischia di far perdere i pochi giorni che fanno la differenza
+    («time in market > timing the market»). Restituisce ``{"valido": False}`` se i
+    dati sono insufficienti.
+    """
+    r = serie_rendimenti.dropna()
+    if len(r) <= n:
+        return {"valido": False}
+    tot = float((1.0 + r).prod() - 1.0)
+    r_senza = r.copy()
+    r_senza.loc[r.nlargest(n).index] = 0.0
+    tot_senza = float((1.0 + r_senza).prod() - 1.0)
+    return {
+        "valido": True, "n": int(n), "n_giorni": int(len(r)),
+        "tot": tot, "tot_senza": tot_senza, "differenza": tot - tot_senza,
+    }
+
+
 def rendimento_cumulato(rendimenti: pd.Series) -> float:
     """Rendimento cumulato totale sul periodo (frazione, es. 0.8 = +80%)."""
     rendimenti = rendimenti.dropna()

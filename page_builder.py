@@ -60,7 +60,14 @@ with st.container(border=True):
 with st.container(border=True):
     st.markdown("### 📋 Portafoglio (asset selezionati e pesi)")
 
-    # Portafogli "pronti" da caricare con un clic.
+    # B4 — portafogli pronti "in evidenza" come pulsanti cliccabili (un clic per partire).
+    st.caption("🚀 Parti da un portafoglio pronto (passivo e diversificato):")
+    _pc = st.columns(len(cm.PRESET_IN_EVIDENZA))
+    for _i, _nome in enumerate(cm.PRESET_IN_EVIDENZA):
+        _pc[_i].button(_nome, key=f"preset_ev_{_i}", width="stretch",
+                       on_click=cm.cb_carica_preset, args=(_nome,))
+
+    # Portafogli "pronti" da caricare con un clic (lista completa).
     pp1, pp2 = st.columns([3, 1])
     preset_sel = pp1.selectbox(
         "Portafogli pronti", ["—"] + list(cm.PORTAFOGLI_PRONTI.keys()),
@@ -173,12 +180,28 @@ col1, col2, col3 = st.columns(3)
 col1.metric("Asset analizzati", len(tickers_ok))
 col2.metric("Periodo", f"{prezzi.index.min():%d/%m/%Y} → {prezzi.index.max():%d/%m/%Y}")
 col3.metric("Valuta", ss.valuta_base if ss.converti else "nativa (mista)")
+
+# A2 — freschezza: data dell'ultima quotazione disponibile.
+st.caption(f"📅 Dati aggiornati al **{prezzi.index.max():%d/%m/%Y}** (fonte: Yahoo Finance).")
+
+# A1 — chiarisce che è la valuta di QUOTAZIONE (borsa), non quella del sottostante.
 if ris.valute:
     valute_txt = ", ".join(f"{nomi.get(t, t)}: {c}" for t, c in ris.valute.items())
-    st.caption(f"Valute native rilevate — {valute_txt}")
+    st.caption(f"Valuta di **quotazione** (borsa) rilevata — {valute_txt}. _Non è la valuta del sottostante._")
+cm.mostra_box_rischio_cambio()
+
+# A4 — se un asset accorcia la finestra comune, dillo esplicitamente.
+_diag = mtr.diagnostica_periodo_comune(ris.finestre)
+if _diag.get("valido") and len(tickers_ok) > 1:
+    _inizio_piu_vecchio = min(p for _t, p, _u, _n in _diag["voci"])
+    if _diag["inizio_comune"] > _inizio_piu_vecchio:
+        _colp = _diag["colpevole_inizio"]
+        st.caption(
+            f"ℹ️ Periodo comune **dal {_diag['inizio_comune']:%d/%m/%Y}**, limitato da "
+            f"**{nomi.get(_colp, _colp)}** (l'asset con lo storico più corto)."
+        )
 
 with st.expander("📅 Storico disponibile per asset (e periodo comune usato)"):
-    _diag = mtr.diagnostica_periodo_comune(ris.finestre)
     if _diag.get("valido"):
         _righe = [
             {"Asset": nomi.get(t, t), "Ticker": t,
@@ -221,17 +244,129 @@ cm.mostra_glossario()
 # ---------------------------------------------------------------------------
 
 SEZIONI = [
-    "📈 Singoli asset", "💼 Portafoglio", "🌍 Allocazione", "⏱️ Timing", "💶 PAC", "🎯 Obiettivo",
-    "💰 Costi e tasse", "💸 Dividendi", "♻️ Ribilanciamento", "📊 Statistica", "🧮 Ottimizzazione",
-    "🆚 Confronto", "🤖 Assistente",
+    "📋 Report", "📈 Singoli asset", "💼 Portafoglio", "🌍 Allocazione", "⏱️ Timing", "💶 PAC",
+    "🎯 Obiettivo", "💰 Costi e tasse", "💸 Dividendi", "♻️ Ribilanciamento", "📊 Statistica",
+    "🧮 Ottimizzazione", "🆚 Confronto", "🤖 Assistente",
 ]
+# B1 — Modalità Base/Avanzato: in Base mostra solo l'essenziale per un passivo.
+SEZIONI_BASE = ["📋 Report", "📈 Singoli asset", "💼 Portafoglio", "🌍 Allocazione",
+                "💶 PAC", "🎯 Obiettivo", "🤖 Assistente"]
+modo_ui = st.radio(
+    "Modalità", ["Base", "Avanzato"], horizontal=True, key="modo_ui",
+    help="Base = l'essenziale per un investitore passivo. Avanzato = tutte le sezioni.",
+)
+opzioni_sez = SEZIONI_BASE if modo_ui == "Base" else SEZIONI
+# Se la sezione salvata non è tra le opzioni correnti, riparti dalla prima.
+if ss.get("sezione_builder") not in opzioni_sez:
+    ss["sezione_builder"] = opzioni_sez[0]
 sezione = st.selectbox(
     "📂 Sezione da visualizzare",
-    SEZIONI,
+    opzioni_sez,
     key="sezione_builder",
     help="Scegli cosa analizzare. Su telefono è più comodo di tante schede affiancate; "
          "inoltre viene calcolata solo la sezione scelta, quindi è più veloce.",
 )
+
+# === Report (vista di sintesi unica) =======================================
+if sezione == "📋 Report":
+    st.subheader("📋 Report del portafoglio")
+    _box_r = {"success": st.success, "warning": st.warning}.get(riep["livello"], st.info)
+    _box_r("🧭 " + riep["testo"])
+
+    r1, r2, r3 = st.columns(3)
+    r1.metric("Rend. annuo (CAGR)", cm.fmt_pct(met_pf['Rend. annuo (CAGR)']))
+    r2.metric("Volatilità annua", cm.fmt_pct(met_pf['Volatilità annua (covarianza)']))
+    r3.metric("Sharpe", cm.fmt_num(met_pf['Sharpe']))
+    r4, r5, r6 = st.columns(3)
+    r4.metric("Sortino", cm.fmt_num(met_pf['Sortino']))
+    r5.metric("Max drawdown", cm.fmt_pct(met_pf['Max drawdown']))
+    r6.metric("Rend. cumulato", cm.fmt_pct(met_pf['Rend. cumulato']))
+
+    _infl_r = ss.get("inflazione", 0.0)
+    if _infl_r > 0 and not pd.isna(met_pf["Rend. annuo (CAGR)"]):
+        _cagr_reale = (1 + met_pf["Rend. annuo (CAGR)"]) / (1 + _infl_r) - 1
+        st.caption(
+            f"Al netto di un'inflazione del {cm.fmt_pct(_infl_r, 1)}/anno, il rendimento **reale** "
+            f"(potere d'acquisto) è **{cm.fmt_pct(_cagr_reale)}/anno**."
+        )
+
+    # Andamento del portafoglio vs benchmark (base 100).
+    st.markdown("**Andamento: il tuo portafoglio vs benchmark** (base 100)")
+    serie_pf_r = mtr.serie_rendimenti_portafoglio(rendimenti, pesi)
+    dati_cum = {"Il mio portafoglio": mtr.serie_cumulata(serie_pf_r, base=100.0)}
+    with st.spinner("Carico i benchmark di confronto..."):
+        for _bench in ("100% MSCI World", "60/40 (azioni/obbligazioni)"):
+            _s, _ = cm.rendimenti_portafoglio_famoso(
+                _bench, ss.period, ss.data_inizio, ss.data_fine, ss.valuta_base, ss.converti
+            )
+            if not _s.empty:
+                dati_cum[_bench] = mtr.serie_cumulata(_s, base=100.0)
+    _cum_r = pd.DataFrame(dati_cum).dropna()
+    fig_r = px.line(_cum_r, labels={"value": "Indice (base 100)", "index": "Data", "variable": "Serie"})
+    fig_r.update_traces(selector=dict(name="Il mio portafoglio"), line=dict(width=3.4, color="black"))
+    fig_r.update_layout(hovermode="x unified", legend_title_text="Serie", margin=dict(t=20))
+    st.plotly_chart(fig_r, width="stretch")
+    st.caption(
+        "Cosa significa per te: se la linea nera (il tuo portafoglio) sta sopra i benchmark, storicamente "
+        "ha reso di più; se sta sotto, di meno. Conta l'andamento di lungo periodo, non i singoli mesi."
+    )
+
+    # Drawdown del portafoglio (quanto sei stato sotto il picco precedente).
+    st.markdown("**Drawdown del portafoglio** (distanza dal massimo precedente)")
+    dd_r = mtr.serie_drawdown(serie_pf_r)
+    fig_ddr = px.area(dd_r, labels={"value": "Drawdown", "index": "Data"})
+    fig_ddr.update_yaxes(tickformat=".0%")
+    fig_ddr.update_layout(showlegend=False, margin=dict(t=20))
+    st.plotly_chart(fig_ddr, width="stretch")
+    st.caption(
+        "Cosa significa per te: mostra quanto saresti stato 'sotto' rispetto al picco precedente. "
+        "Le discese fanno parte del gioco: l'importante è l'orizzonte lungo."
+    )
+    # C3 — tempo di recupero / quanto a lungo sotto il picco.
+    _sdd = mtr.statistiche_drawdown(serie_pf_r)
+    if _sdd.get("valido"):
+        _msg_dd = (
+            f"⏳ Calo massimo **{_sdd['max_dd']:.1%}**; sei rimasto in perdita (sotto il picco) "
+            f"al massimo per **~{_sdd['durata_max_mesi']:.0f} mesi** di fila."
+        )
+        if _sdd["in_perdita_ora"] and _sdd["mesi_perdita_ora"] >= 1:
+            _msg_dd += f" In questo momento sei sotto il picco da ~{_sdd['mesi_perdita_ora']:.0f} mesi."
+        st.caption(_msg_dd)
+
+    # Verdetto diversificazione (geografica e settoriale) sintetico.
+    _comp_r = cm.composizione_effettiva(tickers_ok)
+    _dg = mtr.indice_diversificazione(mtr.aggrega_composizione(pesi, _comp_r, "paese")[0])
+    _ds = mtr.indice_diversificazione(mtr.aggrega_composizione(pesi, _comp_r, "settore")[0])
+    _parti = []
+    if _dg.get("valido"):
+        _parti.append(f"🌍 geografica **{_dg['livello']}** ({_dg['punteggio']}/100)")
+    if _ds.get("valido"):
+        _parti.append(f"🏭 settoriale **{_ds['livello']}** ({_ds['punteggio']}/100)")
+    if _parti:
+        st.markdown("**Diversificazione:** " + " · ".join(_parti)
+                    + " — dettagli nella sezione 🌍 Allocazione.")
+
+    # D5 — esporta / condividi.
+    with st.expander("📤 Esporta / condividi"):
+        _csv_pf = ss.selezionati[["Ticker", "Nome", "Peso %"]].to_csv(index=False).encode("utf-8")
+        st.download_button("⬇️ Portafoglio (CSV)", _csv_pf, file_name="portafoglio_sharpe.csv",
+                           mime="text/csv", key="dl_pf_csv")
+        _df_met = pd.DataFrame({
+            "Metrica": ["Rend. annuo (CAGR)", "Volatilità annua", "Sharpe", "Sortino",
+                        "Max drawdown", "Rend. cumulato"],
+            "Valore": [met_pf["Rend. annuo (CAGR)"], met_pf["Volatilità annua (covarianza)"],
+                       met_pf["Sharpe"], met_pf["Sortino"], met_pf["Max drawdown"],
+                       met_pf["Rend. cumulato"]],
+        })
+        st.download_button("⬇️ Metriche del Report (CSV)",
+                           _df_met.to_csv(index=False).encode("utf-8"),
+                           file_name="metriche_sharpe.csv", mime="text/csv", key="dl_met_csv")
+        if st.button("🔗 Crea link condivisibile", key="btn_link_pf"):
+            st.query_params["pf"] = cm.link_portafoglio(ss.selezionati)
+        if "pf" in st.query_params:
+            st.caption("✅ Link pronto: **copia l'indirizzo dalla barra del browser** (contiene `?pf=…`). "
+                       "Chi lo apre ritrova questo stesso portafoglio.")
+        st.caption("💡 Per un **PDF**: usa «Stampa → Salva come PDF» del browser.")
 
 # === Singoli asset =========================================================
 if sezione == "📈 Singoli asset":
@@ -290,6 +425,10 @@ if sezione == "💼 Portafoglio":
     fig_cmp.update_traces(selector=dict(name="PORTAFOGLIO"), line=dict(width=3.5, color="black"))
     fig_cmp.update_layout(hovermode="x unified")
     st.plotly_chart(fig_cmp, width="stretch")
+    st.caption(
+        "Cosa significa per te: la linea nera è il **tuo portafoglio**; le altre sono i singoli asset. "
+        "Se la nera è più «liscia» dei singoli, la diversificazione sta smorzando le oscillazioni."
+    )
 
     # Confronto sempre disponibile con benchmark di riferimento.
     st.subheader("Portafoglio vs benchmark di riferimento (base 100)")
@@ -322,6 +461,9 @@ if sezione == "💼 Portafoglio":
         corr_grezza = mtr.matrice_correlazione(rendimenti)
         corr = corr_grezza.rename(index=nomi_corti, columns=nomi_corti)
         fig_corr = px.imshow(corr, text_auto=".2f", color_continuous_scale="RdBu_r", zmin=-1, zmax=1, aspect="auto")
+        fig_corr.update_layout(height=max(360, 70 * len(corr) + 140), margin=dict(t=20, l=10, r=10),
+                               coloraxis_colorbar=dict(title="corr"))
+        fig_corr.update_xaxes(tickangle=-30)
         st.plotly_chart(fig_corr, width="stretch")
         st.caption(
             "Valori vicini a 1 = molto correlati (poca diversificazione); "
@@ -514,6 +656,10 @@ if sezione == "🌍 Allocazione":
             fig_bar.update_xaxes(tickformat=".0%")
             fig_bar.update_layout(yaxis={"categoryorder": "total ascending"})
             st.plotly_chart(fig_bar, width="stretch")
+        st.caption(
+            f"Cosa significa per te: è la tua esposizione reale per **{tipo}**. Se una sola voce pesa "
+            "molto (es. oltre il 60%), dipendi parecchio da quel singolo mercato."
+        )
 
 # === Timing (rolling returns) =============================================
 if sezione == "⏱️ Timing":
@@ -581,6 +727,37 @@ if sezione == "⏱️ Timing":
                 f"{len(roll)} possibili giorni di partenza analizzati su ~{anni_storico:.1f} anni di storico. "
                 "⚠️ I rendimenti passati non garantiscono quelli futuri."
             )
+
+            # C2 — distribuzione dei risultati + messaggio "time in market".
+            st.markdown("**Distribuzione dei risultati** (tutte le finestre possibili)")
+            fig_dist = px.histogram(roll, nbins=30, labels={"value": "Rendimento medio annuo"})
+            fig_dist.add_vline(x=float(mediana), line_dash="dash", line_color="orange",
+                               annotation_text=f"mediana {mediana:.1%}")
+            fig_dist.add_vline(x=0, line_color="gray", opacity=0.6)
+            fig_dist.update_xaxes(tickformat=".0%")
+            fig_dist.update_layout(showlegend=False, bargap=0.05, margin=dict(t=20))
+            st.plotly_chart(fig_dist, width="stretch")
+            st.caption(
+                "Cosa significa per te: più le barre stanno a **destra dello zero**, più spesso questa "
+                f"finestra di {anni_fin} anni ha chiuso in guadagno. È l'idea di **«time in market» batte "
+                "«timing the market»**: contare sul tempo, non sull'azzeccare il momento."
+            )
+
+            # C4 — costo di restare fuori nei giorni migliori (anti-timing).
+            _cmg = mtr.costo_perdere_migliori_giorni(serie_pf_max, 10)
+            if _cmg.get("valido"):
+                st.markdown("**E se provi a fare «timing» e perdi i 10 giorni migliori?**")
+                _cc1, _cc2 = st.columns(2)
+                _cc1.metric("Sempre investito", f"{_cmg['tot']:.0%}",
+                            help="Rendimento totale dell'intero storico, restando sempre investito.")
+                _cc2.metric("Senza i 10 giorni migliori", f"{_cmg['tot_senza']:.0%}",
+                            f"{_cmg['tot_senza'] - _cmg['tot']:+.0%}",
+                            help="Stesso periodo, ma saltando i 10 giorni di rialzo più forti.")
+                st.caption(
+                    "Cosa significa per te: gran parte del guadagno arriva in **pochissimi giorni**, "
+                    "spesso a sorpresa subito dopo i cali. Uscire e rientrare rischia di **farteli "
+                    "perdere**: per questo, da passivo, conviene restare investiti."
+                )
 
 # === PAC / DCA (backtest storico) =========================================
 if sezione == "💶 PAC":
@@ -746,7 +923,45 @@ if sezione == "💰 Costi e tasse":
             st.metric("Costo del TER", f"−{res_c['costo_ter']:,.0f} €", help="Quanto ti sarebbe costato il TER.")
             st.metric("Tasse stimate", f"−{res_c['tasse']:,.0f} €", help="Tasse sul guadagno, alla vendita.")
             st.metric("Valore netto", f"{res_c['val_netto']:,.0f} €", help="Dopo TER, bollo e tasse.")
-    st.caption("⚠️ Stima didattica: la fiscalità reale dipende dallo strumento e dalla normativa vigente.")
+    # C5 — impatto CUMULATO del TER nel tempo (effetto composto), in €.
+    st.markdown("**Quanto ti «mangia» il TER nel tempo** (costo cumulato, €)")
+    anni_max_c = max(orizzonti)
+    righe_ter = []
+    for a in range(1, anni_max_c + 1):
+        rc = mtr.proiezione_costi(importo_c, rendimento_lordo, ter_pesato, aliq_pesata, a)
+        righe_ter.append({"Anni": a, "Costo cumulato del TER (€)": rc["costo_ter"]})
+    df_ter = pd.DataFrame(righe_ter).set_index("Anni")
+    fig_ter = px.area(df_ter, labels={"value": "Costo del TER (€)", "Anni": "Anni"})
+    fig_ter.update_layout(showlegend=False, margin=dict(t=20))
+    st.plotly_chart(fig_ter, width="stretch")
+    st.caption(
+        f"Cosa significa per te: con un TER medio dello **{ter_pesato:.2%}/anno**, in {anni_max_c} anni "
+        "il costo non è una sommetta fissa: cresce in modo **composto**, perché ogni anno rinunci anche "
+        "al rendimento che quei soldi avrebbero prodotto."
+    )
+
+    # C6 — fiscalità italiana (didattica), con la specificità degli ETF armonizzati.
+    with st.expander("🇮🇹 Fiscalità ETF in Italia — in breve (didattico)"):
+        st.markdown(
+            "- **Aliquota**: **26%** sui guadagni; **12,5%** sulla quota in **titoli di Stato** italiani "
+            "e *white list* (e relativi ETF).\n"
+            "- **Imposta di bollo**: **0,2%/anno** sul controvalore (con intermediario italiano; con "
+            "intermediario estero si applica l'**IVAFE**, equivalente).\n"
+            "- **ETF armonizzati (UCITS) — quirk importante**: i **guadagni** sono «**redditi di "
+            "capitale**», le **perdite** (minusvalenze) sono «**redditi diversi**». I due «cassetti» "
+            "**non si compensano** tra loro: **non** puoi usare minusvalenze pregresse per abbattere il "
+            "guadagno di un ETF, né compensare la perdita di un ETF col guadagno di un altro ETF. Le "
+            "minusvalenze restano però utilizzabili (entro **4 anni**) contro altri *redditi diversi* "
+            "(es. plusvalenze su azioni singole o certificati).\n"
+            "- **Regime amministrato**: con la maggior parte dei broker italiani le tasse sono trattenute "
+            "**in automatico** (sostituto d'imposta).\n\n"
+            "_Questa app usa una stima semplice (aliquota × guadagno) e **non** modella la compensazione "
+            "minus/plus._"
+        )
+    st.caption(
+        "⚠️ Stima **didattica**, non consulenza fiscale: le regole possono cambiare e i casi personali "
+        "variano. Verifica sempre con fonti ufficiali o un professionista."
+    )
 
 # === Dividendi / rendita ===================================================
 if sezione == "💸 Dividendi":
@@ -822,6 +1037,11 @@ if sezione == "♻️ Ribilanciamento":
             fig_rib = px.line(serie_rib, labels={"value": "Indice (base 100)", "index": "Data", "variable": "Strategia"})
             fig_rib.update_layout(hovermode="x unified")
             st.plotly_chart(fig_rib, width="stretch")
+            st.caption(
+                "Cosa significa per te: se le due linee sono vicine, ribilanciare cambia poco; il "
+                "ribilanciamento serve soprattutto a **tenere il rischio sotto controllo**, non per forza "
+                "a guadagnare di più."
+            )
             met_rib = mtr.metriche_asset(mtr.rendimenti_giornalieri(serie_rib), risk_free)
             st.dataframe(cm.formatta_metriche(met_rib), width="stretch")
             st.caption(
@@ -985,6 +1205,11 @@ if sezione == "🧮 Ottimizzazione":
                 fig_f.update_xaxes(tickformat=".0%")
                 fig_f.update_yaxes(tickformat=".0%")
                 st.plotly_chart(fig_f, width="stretch")
+                st.caption(
+                    "Cosa significa per te: la curva è il miglior rendimento ottenibile storicamente per "
+                    "ogni livello di rischio. A parità di rischio, conviene stare il più **in alto** "
+                    "possibile (più rendimento). ⚠️ È basata sul passato."
+                )
             else:
                 st.caption("Impossibile calcolare la frontiera per questo insieme di asset.")
         else:
@@ -1127,3 +1352,6 @@ if sezione == "🤖 Assistente":
     for _ruolo, _testo in ss.chat_ass:
         with st.chat_message(_ruolo, avatar="🤖" if _ruolo == "assistant" else "🧑"):
             st.markdown(_testo)
+
+# A3 — footer disclaimer persistente (sotto qualunque sezione attiva).
+cm.mostra_footer_disclaimer()

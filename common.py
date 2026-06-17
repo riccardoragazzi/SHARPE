@@ -13,7 +13,9 @@ import json
 
 import numpy as np
 import pandas as pd
+import plotly.express as px
 import plotly.graph_objects as go
+import plotly.io as pio
 import streamlit as st
 
 import data as dati
@@ -21,6 +23,18 @@ import dataset_composizioni as dsc
 import metrics as mtr
 
 ss = st.session_state
+
+# --- D3/D4: grafici con numeri in formato italiano (virgola decimale) e palette
+# color-blind friendly (Okabe–Ito). px «cuoce» i colori nelle tracce, quindi la
+# palette resta anche col tema di Streamlit; i separatori valgono per assi/tooltip.
+PALETTE_CB = ["#0072B2", "#E69F00", "#009E73", "#D55E00", "#CC79A7",
+              "#56B4E9", "#F0E442", "#000000"]
+try:
+    pio.templates["sharpe"] = go.layout.Template(layout=dict(separators=",."))
+    pio.templates.default = "plotly+sharpe"
+    px.defaults.color_discrete_sequence = PALETTE_CB
+except Exception:
+    pass
 
 # ---------------------------------------------------------------------------
 # Costanti
@@ -61,10 +75,20 @@ PORTAFOGLI_FAMOSI = {
 # Portafogli "pronti" da caricare nel Builder, con ETF UCITS realmente
 # acquistabili (in EUR su Borsa Italiana / Xetra). Pesi in %.
 PORTAFOGLI_PRONTI = {
-    "3-fund (Mondo + Emergenti + Obblig.)": {"SWDA.MI": 60.0, "EIMI.MI": 20.0, "AGGH.MI": 20.0},
+    "3 ETF pigro (Mondo + Emergenti + Obblig.)": {"SWDA.MI": 60.0, "EIMI.MI": 20.0, "AGGH.MI": 20.0},
     "60/40 (azioni/obbligazioni)": {"SWDA.MI": 60.0, "AGGH.MI": 40.0},
+    "80/20 (azioni/obbligazioni)": {"SWDA.MI": 80.0, "AGGH.MI": 20.0},
+    "All-Weather (semplificato)": {"SWDA.MI": 30.0, "AGGH.MI": 55.0, "SGLD.MI": 15.0},
     "All-world 100% azioni": {"VWCE.DE": 100.0},
 }
+
+# Preset "passivi" da mostrare come pulsanti in evidenza nell'onboarding (B4).
+PRESET_IN_EVIDENZA = [
+    "3 ETF pigro (Mondo + Emergenti + Obblig.)",
+    "60/40 (azioni/obbligazioni)",
+    "80/20 (azioni/obbligazioni)",
+    "All-Weather (semplificato)",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -164,12 +188,38 @@ def etichetta_corta(nome: str, massimo: int = 38) -> str:
     return nome if len(nome) <= massimo else nome[: massimo - 1] + "…"
 
 
+def _num_it(s: str) -> str:
+    """Converte un numero formattato 'all'inglese' (1,234.56) in italiano (1.234,56)."""
+    return s.replace(",", "§").replace(".", ",").replace("§", ".")
+
+
+def fmt_pct(x, dec: int = 2) -> str:
+    """Percentuale in formato italiano, es. 0.1272 -> '12,72%'."""
+    if x is None or (isinstance(x, float) and pd.isna(x)):
+        return "n/d"
+    return _num_it(f"{x * 100:,.{dec}f}") + "%"
+
+
+def fmt_eur(x, dec: int = 2) -> str:
+    """Importo in euro in formato italiano, es. 1234.56 -> '1.234,56 €'."""
+    if x is None or (isinstance(x, float) and pd.isna(x)):
+        return "n/d"
+    return _num_it(f"{x:,.{dec}f}") + " €"
+
+
+def fmt_num(x, dec: int = 2) -> str:
+    """Numero generico in formato italiano, es. 1.5 -> '1,50'."""
+    if x is None or (isinstance(x, float) and pd.isna(x)):
+        return "n/d"
+    return _num_it(f"{x:,.{dec}f}")
+
+
 def formatta_metriche(df: pd.DataFrame):
-    """Restituisce uno Styler con formattazione % e ratio per la tabella."""
+    """Restituisce uno Styler con formattazione (in italiano) % e ratio per la tabella."""
     perc = ["Rend. annuo (CAGR)", "Volatilità annua", "Max drawdown", "Rend. cumulato"]
     ratio = ["Sharpe", "Sortino"]
-    fmt = {c: "{:.2%}" for c in perc if c in df.columns}
-    fmt.update({c: "{:.2f}" for c in ratio if c in df.columns})
+    fmt = {c: (lambda v: fmt_pct(v)) for c in perc if c in df.columns}
+    fmt.update({c: (lambda v: fmt_num(v, 2)) for c in ratio if c in df.columns})
     return df.style.format(fmt)
 
 
@@ -281,8 +331,43 @@ def cb_normalizza():
 # Stato iniziale e barra laterale dei parametri (condivisa tra le pagine)
 # ---------------------------------------------------------------------------
 
+def link_portafoglio(df: pd.DataFrame) -> str:
+    """Codifica il portafoglio in stringa per il link condivisibile: 'TICK:peso,...'."""
+    parti = [f"{r['Ticker']}:{float(r['Peso %']):g}" for _, r in df.iterrows()]
+    return ",".join(parti)
+
+
+def _portafoglio_da_link(pf_par: str):
+    """Decodifica 'TICK:peso,...' (dal query param ?pf=) in un DataFrame portafoglio."""
+    voci = []
+    for parte in str(pf_par).split(","):
+        if ":" not in parte:
+            continue
+        t, _, p = parte.partition(":")
+        t = t.strip().upper()
+        try:
+            peso = float(p.replace(",", "."))
+        except ValueError:
+            continue
+        if t:
+            voci.append((t, peso))
+    if not voci:
+        return None
+    tickers = [t for t, _ in voci]
+    nm = nomi_di(tuple(tickers))
+    return pd.DataFrame({
+        "Ticker": tickers,
+        "Nome": [nm.get(t, t) for t in tickers],
+        "Peso %": [p for _, p in voci],
+    })
+
+
 def init_state():
-    """Inizializza lo stato condiviso (portafoglio di esempio, composizione)."""
+    """Inizializza lo stato condiviso (portafoglio di esempio, composizione).
+
+    Se l'URL contiene un portafoglio condiviso (``?pf=TICK:peso,...``), lo carica
+    UNA volta sola (link condivisibile, D5).
+    """
     if "selezionati" not in ss:
         nomi0 = nomi_di(tuple(DEFAULT_TICKERS))
         ss.selezionati = pd.DataFrame(
@@ -298,6 +383,20 @@ def init_state():
         ss.risultati = []
     if "costi" not in ss:
         ss.costi = {}
+
+    # Link condivisibile: carica il portafoglio dall'URL (una volta sola).
+    if not ss.get("_pf_loaded"):
+        ss._pf_loaded = True
+        try:
+            pf_par = st.query_params.get("pf")
+        except Exception:
+            pf_par = None
+        if pf_par:
+            df_link = _portafoglio_da_link(pf_par)
+            if df_link is not None and not df_link.empty:
+                for k in [k for k in list(ss.keys()) if str(k).startswith("w_")]:
+                    del ss[k]
+                ss.selezionati = df_link
 
 
 def sidebar_parametri():
@@ -533,6 +632,31 @@ def mostra_glossario():
             "- **Rendimento cumulato** — quanto hai guadagnato in **totale** nel periodo.\n\n"
             "_Valori indicativi e didattici: dipendono dal periodo analizzato e non sono garanzie._"
         )
+
+
+def mostra_box_rischio_cambio():
+    """Box didattico sul rischio cambio: valuta di QUOTAZIONE vs del SOTTOSTANTE."""
+    with st.expander("💱 Rischio cambio: cosa significa la «valuta»"):
+        st.markdown(
+            "- La **valuta di quotazione** è quella in cui compri l'ETF in borsa (es. **EUR** su Borsa "
+            "Italiana): è quella mostrata qui sopra come «valuta nativa».\n"
+            "- La **valuta del sottostante** è quella degli asset che l'ETF contiene davvero (es. un ETF "
+            "sul **MSCI World** quotato in EUR possiede comunque molte azioni in **USD** e altre valute).\n"
+            "- Perciò, anche comprando in EUR, sei **esposto al cambio**: se il dollaro si indebolisce "
+            "sull'euro il valore scende (e viceversa), a meno che l'ETF non sia a **cambio coperto (hedged)**.\n\n"
+            "_Qui i prezzi vengono convertiti nella tua valuta base solo per confrontarli; la copertura "
+            "valutaria dipende dal singolo ETF (vedi nome/factsheet, es. «EUR Hedged»)._"
+        )
+
+
+def mostra_footer_disclaimer():
+    """Footer ricorrente col disclaimer, da mostrare in fondo a ogni pagina/sezione."""
+    st.divider()
+    st.caption(
+        "⚠️ **Sharpe** è uno strumento di **analisi e didattico**: non è consulenza finanziaria né "
+        "raccomandazione di investimento. Dati da **Yahoo Finance** (possibili errori o ritardi). "
+        "I rendimenti passati non garantiscono quelli futuri."
+    )
 
 
 def risposta_assistente(domanda: str, dati: dict) -> str:

@@ -135,6 +135,7 @@ if full.empty or "Close" not in full.columns:
     st.stop()
 
 cm.mostra_avvisi_qualita(full[["Close"]])
+st.caption(f"📅 Dati aggiornati al **{full.index.max():%d/%m/%Y}** (fonte: Yahoo Finance).")
 
 close_full = full["Close"]
 # Gli indicatori si calcolano sull'intero storico, così sono corretti anche
@@ -269,3 +270,6 @@ st.caption(
 cm.mostra_lettura_statistica(close_full, rend, risk_free, chiave=f"asset_{ticker}")
 
 cm.mostra_glossario()
+
+# A3 — footer disclaimer persistente.
+cm.mostra_footer_disclaimer()
