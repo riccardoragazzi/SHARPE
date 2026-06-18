@@ -343,8 +343,16 @@ def cb_normalizza():
 # ---------------------------------------------------------------------------
 
 def link_portafoglio(df: pd.DataFrame) -> str:
-    """Codifica il portafoglio in stringa per il link condivisibile: 'TICK:peso,...'."""
-    parti = [f"{r['Ticker']}:{float(r['Peso %']):g}" for _, r in df.iterrows()]
+    """Codifica il portafoglio in stringa per il link condivisibile: 'TICK:peso,...'.
+
+    Esclude gli asset con peso 0 (non avrebbe senso condividerli, e li terrebbe a 0
+    a ogni apertura del link).
+    """
+    parti = [
+        f"{r['Ticker']}:{float(r['Peso %']):g}"
+        for _, r in df.iterrows()
+        if pd.notna(r["Peso %"]) and float(r["Peso %"]) > 0
+    ]
     return ",".join(parti)
 
 
@@ -408,6 +416,12 @@ def init_state():
                 for k in [k for k in list(ss.keys()) if str(k).startswith("w_")]:
                     del ss[k]
                 ss.selezionati = df_link
+            # Consuma il link: togli ?pf dall'URL così i reload NON riapplicano i
+            # pesi (altrimenti un asset salvato a 0% tornerebbe a 0 a ogni Ctrl+F5).
+            try:
+                del st.query_params["pf"]
+            except Exception:
+                pass
 
 
 def sidebar_parametri():
