@@ -434,7 +434,15 @@ def sidebar_parametri():
 
     with st.sidebar.expander("💾 Salva / carica portafoglio"):
         file_pf = st.file_uploader("Carica un portafoglio (.json)", type=["json"], key="up_pf")
+        # Identificatore univoco del file caricato: serve a processarlo UNA volta
+        # sola. Senza questo, il file resta nel caricatore e il blocco rigira a ogni
+        # rerun (anche spostando uno slider), sovrascrivendo i pesi col contenuto del
+        # JSON → non si riuscirebbero più a modificare i pesi a mano.
+        _fid = None
         if file_pf is not None:
+            _fid = getattr(file_pf, "file_id", None) or (file_pf.name, file_pf.size)
+        if file_pf is not None and ss.get("_json_id") != _fid:
+            ss["_json_id"] = _fid
             try:
                 stato = json.load(file_pf)
                 df_caricato = pd.DataFrame(stato["portafoglio"])
