@@ -107,7 +107,7 @@ with st.container(border=True):
                    help="Riscala i pesi così che sommino esattamente a 100%.")
     azione3.button("🧹 Svuota", on_click=cm.cb_svuota, width="stretch")
     tot = sum(pesi_correnti.values())
-    azione4.metric("Somma pesi", f"{tot:.1f}%", help="I pesi vengono comunque normalizzati a 100% per i calcoli.")
+    azione4.metric("Somma pesi", f"{cm.fmt_num(tot, 1)}%", help="I pesi vengono comunque normalizzati a 100% per i calcoli.")
 
 tickers = sel["Ticker"].tolist()
 pesi_input = pd.Series([pesi_correnti[t] for t in tickers], index=tickers)
@@ -170,6 +170,8 @@ risk_free = ss.risk_free
 
 nomi = {t: ss.selezionati.set_index("Ticker")["Nome"].get(t, t) for t in tickers_ok}
 nomi_corti = {t: cm.etichetta_corta(nomi[t]) for t in tickers_ok}
+# Etichette per assi/legende dei grafici: il TICKER corto (es. "SWDA"), più leggibile dei nomi lunghi.
+etichette_grafico = {t: str(t).split(".")[0] for t in tickers_ok}
 
 # Metriche del portafoglio: calcolate qui (una volta) perché servono sia alla
 # sezione «Portafoglio» sia alla sezione «Ottimizzazione». Con il menu a tendina
@@ -251,21 +253,40 @@ SEZIONI = [
 # B1 — Modalità Base/Avanzato: in Base mostra solo l'essenziale per un passivo.
 SEZIONI_BASE = ["📋 Report", "📈 Singoli asset", "💼 Portafoglio", "🌍 Allocazione",
                 "💶 PAC", "🎯 Obiettivo", "🤖 Assistente"]
+# Stato UI persistente anche cambiando pagina: i widget perdono il valore quando non
+# vengono renderizzati (es. mentre si è su Analisi tecnica), quindi lo conserviamo in
+# chiavi "specchio" non-widget (modo_ui_val / sezione_val) e lo ripristiniamo.
+ss.setdefault("modo_ui_val", "Base")
+if "modo_ui" not in ss:
+    ss["modo_ui"] = ss["modo_ui_val"]
+
+def _salva_modo():
+    ss.modo_ui_val = ss.modo_ui
+
 modo_ui = st.radio(
-    "Modalità", ["Base", "Avanzato"], horizontal=True, key="modo_ui",
+    "Modalità", ["Base", "Avanzato"], horizontal=True, key="modo_ui", on_change=_salva_modo,
     help="Base = l'essenziale per un investitore passivo. Avanzato = tutte le sezioni.",
 )
+ss.modo_ui_val = modo_ui
 opzioni_sez = SEZIONI_BASE if modo_ui == "Base" else SEZIONI
-# Se la sezione salvata non è tra le opzioni correnti, riparti dalla prima.
+ss.setdefault("sezione_val", opzioni_sez[0])
+if ss.sezione_val not in opzioni_sez:
+    ss.sezione_val = opzioni_sez[0]
+# Ripristina/valida la selezione (sopravvive al cambio pagina e al cambio modalità).
 if ss.get("sezione_builder") not in opzioni_sez:
-    ss["sezione_builder"] = opzioni_sez[0]
+    ss["sezione_builder"] = ss.sezione_val
+
+def _salva_sezione():
+    ss.sezione_val = ss.sezione_builder
+
 sezione = st.selectbox(
     "📂 Sezione da visualizzare",
     opzioni_sez,
-    key="sezione_builder",
+    key="sezione_builder", on_change=_salva_sezione,
     help="Scegli cosa analizzare. Su telefono è più comodo di tante schede affiancate; "
          "inoltre viene calcolata solo la sezione scelta, quindi è più veloce.",
 )
+ss.sezione_val = sezione
 
 # === Report (vista di sintesi unica) =======================================
 if sezione == "📋 Report":
@@ -326,11 +347,11 @@ if sezione == "📋 Report":
     _sdd = mtr.statistiche_drawdown(serie_pf_r)
     if _sdd.get("valido"):
         _msg_dd = (
-            f"⏳ Calo massimo **{_sdd['max_dd']:.1%}**; sei rimasto in perdita (sotto il picco) "
-            f"al massimo per **~{_sdd['durata_max_mesi']:.0f} mesi** di fila."
+            f"⏳ Calo massimo **{cm.fmt_pct(_sdd['max_dd'], 1)}**; sei rimasto in perdita (sotto il picco) "
+            f"al massimo per **~{cm.fmt_num(_sdd['durata_max_mesi'], 0)} mesi** di fila."
         )
         if _sdd["in_perdita_ora"] and _sdd["mesi_perdita_ora"] >= 1:
-            _msg_dd += f" In questo momento sei sotto il picco da ~{_sdd['mesi_perdita_ora']:.0f} mesi."
+            _msg_dd += f" In questo momento sei sotto il picco da ~{cm.fmt_num(_sdd['mesi_perdita_ora'], 0)} mesi."
         st.caption(_msg_dd)
 
     # Verdetto diversificazione (geografica e settoriale) sintetico.
@@ -366,7 +387,28 @@ if sezione == "📋 Report":
         if "pf" in st.query_params:
             st.caption("✅ Link pronto: **copia l'indirizzo dalla barra del browser** (contiene `?pf=…`). "
                        "Chi lo apre ritrova questo stesso portafoglio.")
-        st.caption("💡 Per un **PDF**: usa «Stampa → Salva come PDF» del browser.")
+        # Report PDF di 1 pagina.
+        _dati_pdf = {
+            "data": pd.Timestamp.today().strftime("%d/%m/%Y"),
+            "portafoglio": [(r["Nome"], cm.fmt_num(r["Peso %"], 1) + "%")
+                            for _, r in ss.selezionati.iterrows()],
+            "metriche": [
+                ("Rendimento annuo (CAGR)", cm.fmt_pct(met_pf["Rend. annuo (CAGR)"])),
+                ("Volatilita annua", cm.fmt_pct(met_pf["Volatilità annua (covarianza)"])),
+                ("Sharpe", cm.fmt_num(met_pf["Sharpe"])),
+                ("Sortino", cm.fmt_num(met_pf["Sortino"])),
+                ("Max drawdown", cm.fmt_pct(met_pf["Max drawdown"])),
+                ("Rendimento cumulato", cm.fmt_pct(met_pf["Rend. cumulato"])),
+            ],
+            "verdetto": riep["testo"],
+        }
+        _pdf = cm.genera_report_pdf(_dati_pdf)
+        if _pdf:
+            st.download_button("⬇️ Report PDF (1 pagina)", _pdf, file_name="report_sharpe.pdf",
+                               mime="application/pdf", key="dl_pdf")
+        else:
+            st.caption("💡 Per un **PDF**: usa «Stampa → Salva come PDF» del browser "
+                       "(libreria PDF non disponibile).")
 
 # === Singoli asset =========================================================
 if sezione == "📈 Singoli asset":
@@ -375,7 +417,7 @@ if sezione == "📈 Singoli asset":
     st.dataframe(cm.formatta_metriche(met_asset), width="stretch")
 
     st.subheader("Andamento normalizzato (base 100)")
-    cum = mtr.serie_cumulata(rendimenti, base=100.0).rename(columns=nomi_corti)
+    cum = mtr.serie_cumulata(rendimenti, base=100.0).rename(columns=etichette_grafico)
     fig = px.line(cum, labels={"value": "Indice (base 100)", "index": "Data", "variable": "Asset"})
     fig.update_layout(legend_title_text="Asset", hovermode="x unified")
     st.plotly_chart(fig, width="stretch")
@@ -385,7 +427,7 @@ if sezione == "📈 Singoli asset":
     )
 
     st.subheader("Drawdown")
-    dd = pd.DataFrame({nomi_corti[t]: mtr.serie_drawdown(rendimenti[t]) for t in tickers_ok})
+    dd = pd.DataFrame({etichette_grafico[t]: mtr.serie_drawdown(rendimenti[t]) for t in tickers_ok})
     fig_dd = px.area(dd, labels={"value": "Drawdown", "index": "Data", "variable": "Asset"})
     fig_dd.update_layout(legend_title_text="Asset", hovermode="x unified")
     fig_dd.update_yaxes(tickformat=".0%")
@@ -398,35 +440,35 @@ if sezione == "📈 Singoli asset":
 # === Portafoglio ===========================================================
 if sezione == "💼 Portafoglio":
     st.subheader("Metriche del portafoglio")
-    st.caption("Pesi normalizzati: " + ", ".join(f"{nomi[t]} {p:.1%}" for t, p in pesi.items()))
+    st.caption("Pesi normalizzati: " + ", ".join(f"{nomi[t]} {cm.fmt_pct(p, 1)}" for t, p in pesi.items()))
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Rend. annuo (CAGR)", f"{met_pf['Rend. annuo (CAGR)']:.2%}",
+    c1.metric("Rend. annuo (CAGR)", f"{cm.fmt_pct(met_pf['Rend. annuo (CAGR)'])}",
               help="Crescita media all'anno nel periodo. Più alto è meglio, ma guardalo col rischio.")
-    c2.metric("Volatilità (covarianza)", f"{met_pf['Volatilità annua (covarianza)']:.2%}",
+    c2.metric("Volatilità (covarianza)", f"{cm.fmt_pct(met_pf['Volatilità annua (covarianza)'])}",
               help="Quanto oscilla il valore: <8% basso, 8–15% medio, >15% alto.")
-    c3.metric("Sharpe", f"{met_pf['Sharpe']:.2f}",
+    c3.metric("Sharpe", f"{cm.fmt_num(met_pf['Sharpe'], 2)}",
               help="Rendimento per unità di rischio: >1 buono, >2 ottimo, <0 il rischio non ha pagato.")
-    c4.metric("Sortino", f"{met_pf['Sortino']:.2f}",
+    c4.metric("Sortino", f"{cm.fmt_num(met_pf['Sortino'], 2)}",
               help="Come lo Sharpe ma conta solo le oscillazioni verso il basso (le perdite).")
     c5, c6, c7 = st.columns(3)
-    c5.metric("Max drawdown", f"{met_pf['Max drawdown']:.2%}",
+    c5.metric("Max drawdown", f"{cm.fmt_pct(met_pf['Max drawdown'])}",
               help="Perdita massima dal picco al minimo successivo. Più vicino a 0 è meglio.")
-    c6.metric("Rend. cumulato", f"{met_pf['Rend. cumulato']:.2%}",
+    c6.metric("Rend. cumulato", f"{cm.fmt_pct(met_pf['Rend. cumulato'])}",
               help="Guadagno totale nel periodo analizzato.")
-    c7.metric("Volatilità (serie)", f"{met_pf['Volatilità annua (serie)']:.2%}",
+    c7.metric("Volatilità (serie)", f"{cm.fmt_pct(met_pf['Volatilità annua (serie)'])}",
               help="Volatilità calcolata sui rendimenti del portafoglio (di norma uguale a quella da covarianza).")
     _infl = ss.get("inflazione", 0.0)
     if _infl > 0 and not pd.isna(met_pf["Rend. annuo (CAGR)"]):
         cagr_reale = (1 + met_pf["Rend. annuo (CAGR)"]) / (1 + _infl) - 1
         st.caption(
-            f"Rendimento **reale** (al netto di un'inflazione del {_infl:.1%}/anno): "
-            f"**{cagr_reale:.2%}/anno** — la crescita effettiva del potere d'acquisto."
+            f"Rendimento **reale** (al netto di un'inflazione del {cm.fmt_pct(_infl, 1)}/anno): "
+            f"**{cm.fmt_pct(cagr_reale)}/anno** — la crescita effettiva del potere d'acquisto."
         )
 
     st.subheader("Portafoglio vs singoli asset (base 100)")
     serie_pf = mtr.serie_rendimenti_portafoglio(rendimenti, pesi)
-    cum_all = mtr.serie_cumulata(rendimenti, base=100.0).rename(columns=nomi_corti)
+    cum_all = mtr.serie_cumulata(rendimenti, base=100.0).rename(columns=etichette_grafico)
     cum_all["PORTAFOGLIO"] = mtr.serie_cumulata(serie_pf, base=100.0)
     fig_cmp = px.line(cum_all, labels={"value": "Indice (base 100)", "index": "Data", "variable": "Serie"})
     fig_cmp.update_traces(line=dict(width=1.2))
@@ -467,7 +509,7 @@ if sezione == "💼 Portafoglio":
     with col_a:
         st.subheader("Matrice di correlazione")
         corr_grezza = mtr.matrice_correlazione(rendimenti)
-        corr = corr_grezza.rename(index=nomi_corti, columns=nomi_corti)
+        corr = corr_grezza.rename(index=etichette_grafico, columns=etichette_grafico)
         fig_corr = px.imshow(corr, text_auto=".2f", color_continuous_scale="RdBu_r", zmin=-1, zmax=1, aspect="auto")
         fig_corr.update_layout(height=max(360, 70 * len(corr) + 140), margin=dict(t=20, l=10, r=10),
                                coloraxis_colorbar=dict(title="corr"))
@@ -483,17 +525,17 @@ if sezione == "💼 Portafoglio":
                   for ii in range(len(cols_c)) for jj in range(ii + 1, len(cols_c))
                   if corr_grezza.iloc[ii, jj] > 0.9]
         if coppie:
-            righe = "; ".join(f"**{nomi.get(a, a)}** ↔ **{nomi.get(b, b)}** ({c:.0%})" for a, b, c in coppie)
+            righe = "; ".join(f"**{nomi.get(a, a)}** ↔ **{nomi.get(b, b)}** ({cm.fmt_pct(c, 0)})" for a, b, c in coppie)
             st.warning(
                 f"⚠️ Asset molto sovrapposti (correlazione > 90%): {righe}. "
                 "Si muovono quasi insieme: tenerli entrambi aggiunge poca diversificazione."
             )
     with col_b:
         st.subheader("Contributo al rischio")
-        rc = mtr.contributo_rischio(rendimenti, pesi).rename(index=nomi)
+        rc = mtr.contributo_rischio(rendimenti, pesi)
         rc_plot = rc.reset_index().rename(columns={"index": "Asset"})
-        rc_plot["Asset"] = rc_plot["Asset"].map(cm.etichetta_corta)
-        fig_rc = px.bar(rc_plot, x="Asset", y="Contributo %", text=rc_plot["Contributo %"].map(lambda v: f"{v:.1%}"))
+        rc_plot["Asset"] = rc_plot["Asset"].map(lambda t: str(t).split(".")[0])
+        fig_rc = px.bar(rc_plot, x="Asset", y="Contributo %", text=rc_plot["Contributo %"].map(lambda v: f"{cm.fmt_pct(v, 1)}"))
         fig_rc.update_yaxes(tickformat=".0%")
         fig_rc.update_layout(showlegend=False)
         st.plotly_chart(fig_rc, width="stretch")
@@ -503,8 +545,10 @@ if sezione == "💼 Portafoglio":
         )
         st.dataframe(
             rc.style.format(
-                {"Peso": "{:.2%}", "Contributo marginale": "{:.4f}",
-                 "Contributo assoluto": "{:.4f}", "Contributo %": "{:.2%}"}
+                {"Peso": (lambda v: cm.fmt_pct(v)),
+                 "Contributo marginale": (lambda v: cm.fmt_num(v, 4)),
+                 "Contributo assoluto": (lambda v: cm.fmt_num(v, 4)),
+                 "Contributo %": (lambda v: cm.fmt_pct(v))}
             ),
             width="stretch",
         )
@@ -604,7 +648,7 @@ if sezione == "🌍 Allocazione":
                      if comp_eff.get(t, {}).get("paese")}
     coppie_ov = mtr.coppie_sovrapposte(distrib_paese, soglia=0.9)
     if coppie_ov:
-        righe = "; ".join(f"**{nomi.get(a, a)}** ↔ **{nomi.get(b, b)}** ({s:.0%} simili)"
+        righe = "; ".join(f"**{nomi.get(a, a)}** ↔ **{nomi.get(b, b)}** ({cm.fmt_pct(s, 0)} simili)"
                           for a, b, s in coppie_ov)
         st.warning(
             f"⚠️ **Sovrapposizione**: {righe}. Questi asset azionari espongono in gran parte "
@@ -638,8 +682,8 @@ if sezione == "🌍 Allocazione":
                 f"(**{info['punteggio']}/100**)"
             )
             st.markdown(
-                f"Quota principale: **{info['top_categoria']} {info['top_peso']:.0%}**.  \n"
-                f"≈ **{info['numero_effettivo']:.1f} {parola}** ben distribuiti "
+                f"Quota principale: **{info['top_categoria']} {cm.fmt_pct(info['top_peso'], 0)}**.  \n"
+                f"≈ **{cm.fmt_num(info['numero_effettivo'], 1)} {parola}** ben distribuiti "
                 f"(su {info['n_categorie']} presenti)."
             )
     st.divider()
@@ -709,18 +753,23 @@ if sezione == "⏱️ Timing":
         if roll.empty:
             st.warning(
                 f"Storico insufficiente: servono più di **{anni_fin} anni** di dati comuni a tutti "
-                f"gli asset, ma ne risultano circa **{anni_storico:.1f}**. Prova una finestra più corta."
+                f"gli asset, ma ne risultano circa **{cm.fmt_num(anni_storico, 1)}**. Prova una finestra più corta."
             )
         else:
             # Statistiche di sintesi.
             peggiore, mediana, migliore = roll.min(), roll.median(), roll.max()
             quota_pos = float((roll > 0).mean())
             s1, s2, s3, s4, s5 = st.columns(5)
-            s1.metric("Peggiore", f"{peggiore:.2%}/anno", help="Il risultato peggiore tra tutti i giorni di partenza possibili.")
-            s2.metric("Mediana", f"{mediana:.2%}/anno", help="Il valore centrale: metà dei casi è sopra, metà sotto.")
-            s3.metric("Migliore", f"{migliore:.2%}/anno", help="Il risultato migliore tra tutti i giorni di partenza possibili.")
-            s4.metric("Finestre positive", f"{quota_pos:.0%}", help="Quota di giorni di partenza che hanno chiuso in guadagno.")
-            s5.metric("Finestre in perdita", f"{1 - quota_pos:.0%}", help="Quota di giorni di partenza che hanno chiuso in perdita.")
+            s1.metric("Peggiore", cm.fmt_pct(peggiore) + "/anno", help="Il risultato peggiore tra tutti i giorni di partenza possibili.")
+            s2.metric("Mediana", cm.fmt_pct(mediana) + "/anno", help="Il valore centrale: metà dei casi è sopra, metà sotto.")
+            s3.metric("Migliore", cm.fmt_pct(migliore) + "/anno", help="Il risultato migliore tra tutti i giorni di partenza possibili.")
+            s4.metric("Finestre positive", cm.fmt_pct(quota_pos, 0), help="Quota di giorni di partenza che hanno chiuso in guadagno.")
+            s5.metric("Finestre in perdita", cm.fmt_pct(1 - quota_pos, 0), help="Quota di giorni di partenza che hanno chiuso in perdita.")
+            st.info(
+                f"📌 Investendo in una **qualunque** finestra di {anni_fin} anni, avresti reso tra "
+                f"**{cm.fmt_pct(peggiore)}** e **{cm.fmt_pct(migliore)}** all'anno (mediana "
+                f"**{cm.fmt_pct(mediana)}**). Conta più il **tempo** in cui resti investito che il momento d'ingresso."
+            )
 
             fig_roll = go.Figure()
             fig_roll.add_trace(go.Scatter(
@@ -729,7 +778,7 @@ if sezione == "⏱️ Timing":
                 fill="tozeroy", fillcolor="rgba(31,119,180,0.12)",
             ))
             fig_roll.add_hline(y=float(mediana), line_dash="dash", line_color="orange",
-                               annotation_text=f"mediana {mediana:.1%}", annotation_position="top left")
+                               annotation_text=f"mediana {cm.fmt_pct(mediana, 1)}", annotation_position="top left")
             fig_roll.add_hline(y=0, line_color="gray", opacity=0.5)
             fig_roll.update_yaxes(tickformat=".0%", title_text=f"Rendimento medio annuo (finestra {anni_fin} anni)")
             fig_roll.update_xaxes(title_text="Giorno in cui avresti investito")
@@ -740,7 +789,7 @@ if sezione == "⏱️ Timing":
                 "il **momento** in cui entri pesa sempre meno man mano che l'orizzonte si allunga."
             )
             st.caption(
-                f"{len(roll)} possibili giorni di partenza analizzati su ~{anni_storico:.1f} anni di storico. "
+                f"{len(roll)} possibili giorni di partenza analizzati su ~{cm.fmt_num(anni_storico, 1)} anni di storico. "
                 "⚠️ I rendimenti passati non garantiscono quelli futuri."
             )
 
@@ -748,7 +797,7 @@ if sezione == "⏱️ Timing":
             st.markdown("**Distribuzione dei risultati** (tutte le finestre possibili)")
             fig_dist = px.histogram(roll, nbins=30, labels={"value": "Rendimento medio annuo"})
             fig_dist.add_vline(x=float(mediana), line_dash="dash", line_color="orange",
-                               annotation_text=f"mediana {mediana:.1%}")
+                               annotation_text=f"mediana {cm.fmt_pct(mediana, 1)}")
             fig_dist.add_vline(x=0, line_color="gray", opacity=0.6)
             fig_dist.update_xaxes(tickformat=".0%")
             fig_dist.update_layout(showlegend=False, bargap=0.05, margin=dict(t=20))
@@ -764,9 +813,9 @@ if sezione == "⏱️ Timing":
             if _cmg.get("valido"):
                 st.markdown("**E se provi a fare «timing» e perdi i 10 giorni migliori?**")
                 _cc1, _cc2 = st.columns(2)
-                _cc1.metric("Sempre investito", f"{_cmg['tot']:.0%}",
+                _cc1.metric("Sempre investito", f"{cm.fmt_pct(_cmg['tot'], 0)}",
                             help="Rendimento totale dell'intero storico, restando sempre investito.")
-                _cc2.metric("Senza i 10 giorni migliori", f"{_cmg['tot_senza']:.0%}",
+                _cc2.metric("Senza i 10 giorni migliori", f"{cm.fmt_pct(_cmg['tot_senza'], 0)}",
                             f"{_cmg['tot_senza'] - _cmg['tot']:+.0%}",
                             help="Stesso periodo, ma saltando i 10 giorni di rialzo più forti.")
                 st.caption(
@@ -806,11 +855,11 @@ if sezione == "💶 PAC":
         else:
             val = ss.valuta_base if ss.converti else ""
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Capitale versato", f"{res_pac['versato']:,.0f} {val}",
+            m1.metric("Capitale versato", f"{cm.fmt_num(res_pac['versato'], 0)} {val}",
                       help="La somma di tutti i tuoi versamenti.")
-            m2.metric("Valore finale (PAC)", f"{res_pac['valore_finale']:,.0f} {val}",
+            m2.metric("Valore finale (PAC)", f"{cm.fmt_num(res_pac['valore_finale'], 0)} {val}",
                       f"{res_pac['guadagno_pct']:+.1%}", help="Quanto varrebbe oggi il PAC, e il guadagno %.")
-            m3.metric("Investimento unico", f"{res_pac['lump_finale']:,.0f} {val}",
+            m3.metric("Investimento unico", f"{cm.fmt_num(res_pac['lump_finale'], 0)} {val}",
                       f"{res_pac['lump_guadagno_pct']:+.1%}",
                       help="Se avessi investito tutto il capitale finale all'inizio, in un colpo solo.")
             m4.metric("N. versamenti", f"{res_pac['n_versamenti']}", help="Quante volte avresti versato.")
@@ -852,8 +901,8 @@ if sezione == "🎯 Obiettivo":
         sigma = mtr.volatilita_annua(serie_pf_obj)
         reali = bool(ss.get("reali"))
         mu_use = ((1 + mu) / (1 + ss.get("inflazione", 0.0)) - 1) if reali else mu
-        nota_infl = (f" → **reale {mu_use:.1%}/anno** (tolta inflazione {ss.get('inflazione', 0.0):.1%})") if reali else ""
-        st.caption(f"Ipotesi dal tuo portafoglio: rendimento storico **{mu:.1%}/anno**, volatilità **{sigma:.1%}**{nota_infl}.")
+        nota_infl = (f" → **reale {cm.fmt_pct(mu_use, 1)}/anno** (tolta inflazione {cm.fmt_pct(ss.get('inflazione', 0.0), 1)})") if reali else ""
+        st.caption(f"Ipotesi dal tuo portafoglio: rendimento storico **{cm.fmt_pct(mu, 1)}/anno**, volatilità **{cm.fmt_pct(sigma, 1)}**{nota_infl}.")
         if reali:
             st.info("📉 Importi mostrati in **€ di oggi** (al netto dell'inflazione): è il potere d'acquisto reale.")
         proj = mtr.proiezione_obiettivo(mu_use, sigma, obiettivo_eur, orizzonte, prob_perc / 100.0)
@@ -863,17 +912,17 @@ if sezione == "🎯 Obiettivo":
             val = ss.valuta_base if ss.converti else ""
             mc1, mc2 = st.columns(2)
             mc1.metric(
-                f"Versamento mensile (per riuscire ~{proj['prob_target']:.0%})",
-                f"{proj['pmt_mensile']:,.0f} {val}",
+                f"Versamento mensile (per riuscire ~{cm.fmt_pct(proj['prob_target'], 0)})",
+                f"{cm.fmt_num(proj['pmt_mensile'], 0)} {val}",
                 help="Quanto versare ogni mese per raggiungere l'obiettivo con la probabilità scelta.",
             )
-            mc2.metric("Probabilità stimata di riuscita", f"{proj['prob_effettiva']:.0%}",
+            mc2.metric("Probabilità stimata di riuscita", f"{cm.fmt_pct(proj['prob_effettiva'], 0)}",
                        help="Quota di scenari simulati in cui l'obiettivo viene raggiunto con quel versamento.")
             sc1, sc2, sc3 = st.columns(3)
-            sc1.metric("Scenario pessimista", f"{proj['pessimista']:,.0f} {val}",
+            sc1.metric("Scenario pessimista", f"{cm.fmt_num(proj['pessimista'], 0)} {val}",
                        help="Tra i casi peggiori (10° percentile delle simulazioni).")
-            sc2.metric("Scenario medio", f"{proj['medio']:,.0f} {val}", help="Il caso centrale (50%).")
-            sc3.metric("Scenario ottimista", f"{proj['ottimista']:,.0f} {val}",
+            sc2.metric("Scenario medio", f"{cm.fmt_num(proj['medio'], 0)} {val}", help="Il caso centrale (50%).")
+            sc3.metric("Scenario ottimista", f"{cm.fmt_num(proj['ottimista'], 0)} {val}",
                        help="Tra i casi migliori (90° percentile delle simulazioni).")
             bande = proj["bande"].copy()
             bande.index = bande.index / 12.0
@@ -923,7 +972,7 @@ if sezione == "💰 Costi e tasse":
         w = float(pesi.get(t, 0.0))
         ter_pesato += w * float(rr["TER %"]) / 100.0
         aliq_pesata += w * float(rr["Aliquota %"]) / 100.0
-    st.caption(f"TER medio del portafoglio: **{ter_pesato:.2%}/anno** · aliquota media: **{aliq_pesata:.1%}**.")
+    st.caption(f"TER medio del portafoglio: **{cm.fmt_pct(ter_pesato)}/anno** · aliquota media: **{cm.fmt_pct(aliq_pesata, 1)}**.")
 
     importo_c = st.number_input(
         "Capitale di esempio (€)", min_value=100.0, value=10000.0, step=100.0,
@@ -932,7 +981,7 @@ if sezione == "💰 Costi e tasse":
     rendimento_lordo = mtr.cagr(serie_pf_c)
     if pd.isna(rendimento_lordo):
         rendimento_lordo = 0.05
-    st.caption(f"Ipotesi di rendimento lordo: **{rendimento_lordo:.1%}/anno** (storico del portafoglio).")
+    st.caption(f"Ipotesi di rendimento lordo: **{cm.fmt_pct(rendimento_lordo, 1)}/anno** (storico del portafoglio).")
 
     orizzonti = sorted({10, 20, int(orizzonte)})
     cols_anni = st.columns(len(orizzonti))
@@ -940,10 +989,10 @@ if sezione == "💰 Costi e tasse":
         res_c = mtr.proiezione_costi(importo_c, rendimento_lordo, ter_pesato, aliq_pesata, anni_c)
         with col:
             st.markdown(f"**A {anni_c} anni**")
-            st.metric("Valore lordo", f"{res_c['val_lordo']:,.0f} €", help="Senza costi né tasse.")
-            st.metric("Costo del TER", f"−{res_c['costo_ter']:,.0f} €", help="Quanto ti sarebbe costato il TER.")
-            st.metric("Tasse stimate", f"−{res_c['tasse']:,.0f} €", help="Tasse sul guadagno, alla vendita.")
-            st.metric("Valore netto", f"{res_c['val_netto']:,.0f} €", help="Dopo TER, bollo e tasse.")
+            st.metric("Valore lordo", f"{cm.fmt_num(res_c['val_lordo'], 0)} €", help="Senza costi né tasse.")
+            st.metric("Costo del TER", f"−{cm.fmt_num(res_c['costo_ter'], 0)} €", help="Quanto ti sarebbe costato il TER.")
+            st.metric("Tasse stimate", f"−{cm.fmt_num(res_c['tasse'], 0)} €", help="Tasse sul guadagno, alla vendita.")
+            st.metric("Valore netto", f"{cm.fmt_num(res_c['val_netto'], 0)} €", help="Dopo TER, bollo e tasse.")
     # C5 — impatto CUMULATO del TER nel tempo (effetto composto), in €.
     st.markdown("**Quanto ti «mangia» il TER nel tempo** (costo cumulato, €)")
     anni_max_c = max(orizzonti)
@@ -956,7 +1005,7 @@ if sezione == "💰 Costi e tasse":
     fig_ter.update_layout(showlegend=False, margin=dict(t=20))
     st.plotly_chart(fig_ter, width="stretch")
     st.caption(
-        f"Cosa significa per te: con un TER medio dello **{ter_pesato:.2%}/anno**, in {anni_max_c} anni "
+        f"Cosa significa per te: con un TER medio dello **{cm.fmt_pct(ter_pesato)}/anno**, in {anni_max_c} anni "
         "il costo non è una sommetta fissa: cresce in modo **composto**, perché ogni anno rinunci anche "
         "al rendimento che quei soldi avrebbero prodotto."
     )
@@ -1012,15 +1061,17 @@ if sezione == "💸 Dividendi":
                               "Rendita lorda (€)": lordo, "Rendita netta (€)": netto})
 
     md1, md2, md3 = st.columns(3)
-    md1.metric("Yield medio portafoglio", f"{yield_pesato:.2%}",
+    md1.metric("Yield medio portafoglio", f"{cm.fmt_pct(yield_pesato)}",
                help="Rendita annua da dividendi in percentuale del capitale.")
-    md2.metric("Rendita annua lorda", f"{lordo_tot:,.0f} €",
+    md2.metric("Rendita annua lorda", f"{cm.fmt_num(lordo_tot, 0)} €",
                help="Dividendi/cedole stimati in un anno, al lordo delle tasse.")
-    md3.metric("Rendita annua netta", f"{netto_tot:,.0f} €",
+    md3.metric("Rendita annua netta", f"{cm.fmt_num(netto_tot, 0)} €",
                help="Al netto dell'imposta italiana (26%, oppure 12,5% sui titoli di Stato).")
     st.dataframe(
         pd.DataFrame(righe_div).style.format(
-            {"Yield": "{:.2%}", "Rendita lorda (€)": "{:,.0f}", "Rendita netta (€)": "{:,.0f}"}),
+            {"Yield": (lambda v: cm.fmt_pct(v)),
+             "Rendita lorda (€)": (lambda v: cm.fmt_num(v, 0)),
+             "Rendita netta (€)": (lambda v: cm.fmt_num(v, 0))}),
         width="stretch",
     )
     st.caption(
@@ -1139,8 +1190,8 @@ if sezione == "🧮 Ottimizzazione":
             quota_equa = 1.0 / n_asset
             soglia_assoluta = frazione_minima * quota_equa
             st.caption(
-                f"Con {n_asset} asset la quota equipesata è {quota_equa:.1%}: ogni asset peserà "
-                f"**almeno {soglia_assoluta:.1%}** (e **al massimo {1 - (n_asset - 1) * soglia_assoluta:.1%}**)."
+                f"Con {n_asset} asset la quota equipesata è {cm.fmt_pct(quota_equa, 1)}: ogni asset peserà "
+                f"**almeno {cm.fmt_pct(soglia_assoluta, 1)}** (e **al massimo {cm.fmt_pct(1 - (n_asset - 1) * soglia_assoluta, 1)}**)."
             )
             cap_min = max(5, -(-100 // n_asset))  # ceil(100/n): cap minimo ammissibile
             cap_perc = st.slider(
@@ -1171,7 +1222,7 @@ if sezione == "🧮 Ottimizzazione":
         with col_pesi:
             st.markdown("**Pesi ottimali**")
             st.dataframe(
-                w_opt.rename(index=nomi).to_frame("Peso ottimale").style.format({"Peso ottimale": "{:.2%}"}),
+                w_opt.rename(index=nomi).to_frame("Peso ottimale").style.format({"Peso ottimale": (lambda v: cm.fmt_pct(v))}),
                 width="stretch",
             )
             st.button(
@@ -1192,10 +1243,10 @@ if sezione == "🧮 Ottimizzazione":
             )
             st.dataframe(
                 confronto.style.format(
-                    {"Attuale": "{:.2%}", "Ottimale": "{:.2%}"},
+                    {"Attuale": (lambda v: cm.fmt_pct(v)), "Ottimale": (lambda v: cm.fmt_pct(v))},
                     subset=pd.IndexSlice[["Rend. annuo", "Volatilità", "Max drawdown"], :],
                 ).format(
-                    {"Attuale": "{:.2f}", "Ottimale": "{:.2f}"},
+                    {"Attuale": (lambda v: cm.fmt_num(v)), "Ottimale": (lambda v: cm.fmt_num(v))},
                     subset=pd.IndexSlice[["Sharpe", "Sortino"], :],
                 ),
                 width="stretch",
@@ -1211,7 +1262,7 @@ if sezione == "🧮 Ottimizzazione":
                 vol_asset = rendimenti.std(ddof=1) * (mtr.GIORNI_BORSA ** 0.5)
                 fig_f.add_trace(go.Scatter(
                     x=vol_asset.values, y=mu_asset.values, mode="markers+text",
-                    text=[nomi_corti[t] for t in rendimenti.columns], textposition="top center", name="Asset",
+                    text=[etichette_grafico[t] for t in rendimenti.columns], textposition="top center", name="Asset",
                 ))
                 fig_f.add_trace(go.Scatter(
                     x=[met_pf["Volatilità annua (covarianza)"]], y=[met_pf["Rend. annuo (CAGR)"]],

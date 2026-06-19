@@ -381,6 +381,62 @@ def _portafoglio_da_link(pf_par: str):
     })
 
 
+def genera_report_pdf(dati: dict):
+    """Crea un report PDF di 1 pagina (bytes). Ritorna None se fpdf2 non è installato.
+
+    ``dati`` = {"data", "portafoglio": [(nome, peso)], "metriche": [(etichetta, valore)],
+    "verdetto": str}. I valori sono già stringhe formattate (in italiano).
+    """
+    try:
+        from fpdf import FPDF
+        from fpdf.enums import XPos, YPos
+    except Exception:
+        return None
+
+    def _safe(s):
+        # I font core di fpdf sono latin-1: niente € (uso EUR) né emoji.
+        return str(s).replace("**", "").replace("€", "EUR").encode("latin-1", "replace").decode("latin-1")
+
+    nx, ny = XPos.LMARGIN, YPos.NEXT
+    pdf = FPDF(format="A4")
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    def riga(testo, dim=10, stile=""):
+        pdf.set_font("Helvetica", stile, dim)
+        pdf.cell(0, dim * 0.55 + 2, _safe(testo), new_x=nx, new_y=ny)
+
+    def paragrafo(testo, dim=10, stile=""):
+        pdf.set_font("Helvetica", stile, dim)
+        pdf.multi_cell(0, dim * 0.55 + 1, _safe(testo), new_x=nx, new_y=ny)
+
+    riga("Report Sharpe", 16, "B")
+    riga(f"Generato il {dati.get('data', '')}", 10)
+    pdf.ln(3)
+
+    riga("Portafoglio", 12, "B")
+    for nome, peso in dati.get("portafoglio", []):
+        riga(f"- {nome}: {peso}", 10)
+    pdf.ln(2)
+
+    riga("Metriche chiave", 12, "B")
+    for etichetta, valore in dati.get("metriche", []):
+        riga(f"{etichetta}: {valore}", 10)
+    pdf.ln(2)
+
+    if dati.get("verdetto"):
+        riga("Sintesi", 12, "B")
+        paragrafo(dati["verdetto"], 10)
+    pdf.ln(3)
+
+    paragrafo(
+        "Strumento di analisi/didattico: non e' consulenza finanziaria ne' raccomandazione di "
+        "investimento. Dati da Yahoo Finance. I rendimenti passati non garantiscono quelli futuri.",
+        8, "I",
+    )
+    return bytes(pdf.output())
+
+
 def init_state():
     """Inizializza lo stato condiviso (portafoglio di esempio, composizione).
 
@@ -708,7 +764,7 @@ def risposta_assistente(domanda: str, dati: dict) -> str:
         v = met.get(chiave)
         if v is None or (isinstance(v, float) and pd.isna(v)):
             return "n/d"
-        return fmt.format(v)
+        return fmt_pct(v, 1) if "%" in fmt else fmt_num(v, 2)
 
     # --- Guardrail: niente consigli di investimento ---
     parole_consiglio = ("conviene", "compro", "comprare", "vendo", "vendere", "investo",
@@ -729,7 +785,7 @@ def risposta_assistente(domanda: str, dati: dict) -> str:
         if nome and quota is not None:
             return (
                 f"L'asset che incide di più sul rischio è **{nome}**, responsabile di circa "
-                f"**{quota:.0%}** della volatilità del portafoglio. Se una sola voce pesa molto, il "
+                f"**{fmt_pct(quota, 0)}** della volatilità del portafoglio. Se una sola voce pesa molto, il "
                 "portafoglio è **concentrato**: vedi *Contributo al rischio* nella sezione **💼 Portafoglio**."
             )
 
@@ -744,14 +800,14 @@ def risposta_assistente(domanda: str, dati: dict) -> str:
         if dp.get("valido"):
             righe.append(
                 f"- 🌍 **Geografica**: {dp['livello']} ({dp['punteggio']}/100). "
-                f"Quota principale **{dp['top_categoria']} {dp['top_peso']:.0%}**, "
-                f"≈ {dp['numero_effettivo']:.1f} aree."
+                f"Quota principale **{dp['top_categoria']} {fmt_pct(dp['top_peso'], 0)}**, "
+                f"≈ {fmt_num(dp['numero_effettivo'], 1)} aree."
             )
         if dse.get("valido"):
             righe.append(
                 f"- 🏭 **Settoriale**: {dse['livello']} ({dse['punteggio']}/100). "
-                f"Quota principale **{dse['top_categoria']} {dse['top_peso']:.0%}**, "
-                f"≈ {dse['numero_effettivo']:.1f} settori."
+                f"Quota principale **{dse['top_categoria']} {fmt_pct(dse['top_peso'], 0)}**, "
+                f"≈ {fmt_num(dse['numero_effettivo'], 1)} settori."
             )
         if not dp.get("valido") and not dse.get("valido"):
             righe.append("_Composizione per paese/settore non disponibile per questi asset._")
@@ -937,6 +993,10 @@ def mostra_semaforo_mercato():
             "⚠️ Indicazione statistica/storica a scopo **didattico**, non un consiglio di investimento; "
             "i mercati possono comportarsi diversamente."
         )
+        st.caption(
+            "📌 Per un investitore di **lungo periodo** conta soprattutto **restare investiti**: questo "
+            "indicatore è educativo, non un segnale per fare *market timing* (entrare/uscire al momento giusto)."
+        )
 
 
 def mostra_lettura_statistica(prezzo: pd.Series, rendimenti: pd.Series, risk_free: float, chiave: str = ""):
@@ -962,16 +1022,16 @@ def mostra_lettura_statistica(prezzo: pd.Series, rendimenti: pd.Series, risk_fre
         f"{premio:+.1%}" if premio is not None and not np.isnan(premio) else None,
         delta_color="off",
     )
-    b.metric("RSI (14)", f"{rsi_val:.0f}" if not np.isnan(rsi_val) else "—",
+    b.metric("RSI (14)", f"{fmt_num(rsi_val, 0)}" if not np.isnan(rsi_val) else "—",
              mtr.giudizio_rsi(rsi_val), delta_color="off")
     sh = van.get("sharpe", np.nan)
     c.metric("Vantaggio statistico", van["giudizio"],
-             f"Sharpe {sh:.2f}" if sh is not None and not np.isnan(sh) else None, delta_color="off")
+             f"Sharpe {fmt_num(sh, 2)}" if sh is not None and not np.isnan(sh) else None, delta_color="off")
 
     z = val.get("z", np.nan)
     win = van.get("win_rate", np.nan)
-    win_txt = f"{win:.0%}" if win is not None and not np.isnan(win) else "n/d"
-    z_txt = f"{z:.2f}" if z is not None and not np.isnan(z) else "n/d"
+    win_txt = f"{fmt_pct(win, 0)}" if win is not None and not np.isnan(win) else "n/d"
+    z_txt = f"{fmt_num(z, 2)}" if z is not None and not np.isnan(z) else "n/d"
     st.caption(
         f"«Prezzo vs media»: quanto il livello attuale è sopra/sotto la propria media storica "
         f"(z-score {z_txt}). «Vantaggio statistico»: dallo Sharpe storico; finestre di 1 anno "

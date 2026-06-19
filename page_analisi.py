@@ -24,6 +24,11 @@ import metrics as mtr
 ss = st.session_state
 
 st.header("📈 Analisi tecnica per asset")
+st.caption(
+    "ℹ️ Strumento **educativo** di analisi tecnica. Per un investitore di lungo periodo conta soprattutto "
+    "**restare investiti**: il *market timing* (provare a entrare/uscire al momento giusto) è molto "
+    "difficile e spesso controproducente."
+)
 
 
 def _cerca_analisi():
@@ -174,14 +179,14 @@ rend = df["Close"].pct_change().dropna()
 risk_free = ss.risk_free
 st.subheader(f"Statistiche · {nome_asset} · {intervallo}")
 m1, m2, m3, m4, m5, m6 = st.columns(6)
-m1.metric("Rend. cumulato", f"{mtr.rendimento_cumulato(rend):.2%}")
-m2.metric("Rend. annuo (CAGR)", f"{mtr.cagr(rend):.2%}")
-m3.metric("Volatilità", f"{mtr.volatilita_annua(rend):.2%}")
-m4.metric("Sharpe", f"{mtr.sharpe(rend, risk_free):.2f}")
-m5.metric("Sortino", f"{mtr.sortino(rend, risk_free):.2f}")
-m6.metric("Max drawdown", f"{mtr.max_drawdown(rend):.2%}")
+m1.metric("Rend. cumulato", f"{cm.fmt_pct(mtr.rendimento_cumulato(rend))}")
+m2.metric("Rend. annuo (CAGR)", f"{cm.fmt_pct(mtr.cagr(rend))}")
+m3.metric("Volatilità", f"{cm.fmt_pct(mtr.volatilita_annua(rend))}")
+m4.metric("Sharpe", f"{cm.fmt_num(mtr.sharpe(rend, risk_free), 2)}")
+m5.metric("Sortino", f"{cm.fmt_num(mtr.sortino(rend, risk_free), 2)}")
+m6.metric("Max drawdown", f"{cm.fmt_pct(mtr.max_drawdown(rend))}")
 st.caption(
-    f"Ultimo prezzo: **{df['Close'].iloc[-1]:.2f}** (valuta nativa) · "
+    f"Ultimo prezzo: **{cm.fmt_num(df['Close'].iloc[-1], 2)}** (valuta nativa) · "
     f"periodo {df.index.min():%d/%m/%Y} → {df.index.max():%d/%m/%Y} · "
     f"{len(df)} sedute. Prezzi aggiustati per dividendi/split."
 )
