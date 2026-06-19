@@ -256,6 +256,11 @@ config = {
 
 st.plotly_chart(fig, width="stretch", config=config)
 st.caption(
+    "Cosa significa per te: ogni candela è una giornata (verde = chiusura sopra l'apertura, rossa = "
+    "sotto); le **medie mobili** mostrano la tendenza di fondo e l'**RSI** se l'asset è 'tirato'. Sono "
+    "strumenti da analisi tecnica: utili da capire, ma non indispensabili per un investitore passivo."
+)
+st.caption(
     "✏️ Per disegnare: scegli uno strumento (linea, tratto libero, rettangolo) dalla barra in alto a "
     "destra del grafico, poi traccia sul grafico. La gomma cancella. ⚠️ I disegni **non** restano salvati "
     "al ricaricamento della pagina."

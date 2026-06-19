@@ -379,6 +379,10 @@ if sezione == "📈 Singoli asset":
     fig = px.line(cum, labels={"value": "Indice (base 100)", "index": "Data", "variable": "Asset"})
     fig.update_layout(legend_title_text="Asset", hovermode="x unified")
     st.plotly_chart(fig, width="stretch")
+    st.caption(
+        "Cosa significa per te: tutte le linee partono da 100, così confronti la **crescita** dei vari "
+        "asset a parità di partenza (il prezzo assoluto non conta)."
+    )
 
     st.subheader("Drawdown")
     dd = pd.DataFrame({nomi_corti[t]: mtr.serie_drawdown(rendimenti[t]) for t in tickers_ok})
@@ -386,6 +390,10 @@ if sezione == "📈 Singoli asset":
     fig_dd.update_layout(legend_title_text="Asset", hovermode="x unified")
     fig_dd.update_yaxes(tickformat=".0%")
     st.plotly_chart(fig_dd, width="stretch")
+    st.caption(
+        "Cosa significa per te: quanto ogni asset è sceso rispetto al suo massimo precedente. Più la "
+        "curva scende, più forti sono stati i cali da sopportare lungo il percorso."
+    )
 
 # === Portafoglio ===========================================================
 if sezione == "💼 Portafoglio":
@@ -466,8 +474,8 @@ if sezione == "💼 Portafoglio":
         fig_corr.update_xaxes(tickangle=-30)
         st.plotly_chart(fig_corr, width="stretch")
         st.caption(
-            "Valori vicini a 1 = molto correlati (poca diversificazione); "
-            "vicini a 0 o negativi = scorrelati (maggiore diversificazione)."
+            "Cosa significa per te: valori vicini a 1 = asset che si muovono insieme (poca "
+            "diversificazione); vicini a 0 o negativi = si muovono in modo diverso (più diversificazione)."
         )
         # Alert su asset molto sovrapposti.
         cols_c = list(corr_grezza.columns)
@@ -490,8 +498,8 @@ if sezione == "💼 Portafoglio":
         fig_rc.update_layout(showlegend=False)
         st.plotly_chart(fig_rc, width="stretch")
         st.caption(
-            "Quanto ciascun asset contribuisce alla volatilità totale. "
-            "Confronta col peso: chi contribuisce meno del proprio peso diversifica."
+            "Cosa significa per te: quanto ciascun asset contribuisce al rischio (volatilità) totale. "
+            "Se un asset contribuisce **meno** del suo peso, sta diversificando bene."
         )
         st.dataframe(
             rc.style.format(
@@ -529,6 +537,10 @@ if sezione == "🌍 Allocazione":
                 fig_acb.update_xaxes(tickformat=".0%")
                 fig_acb.update_layout(yaxis={"categoryorder": "total ascending"})
                 st.plotly_chart(fig_acb, width="stretch")
+            st.caption(
+                "Cosa significa per te: la divisione tra **azioni, obbligazioni e liquidità**. Più azioni "
+                "= più potenziale di crescita ma più oscillazioni; più obbligazioni = più stabilità."
+            )
 
     st.divider()
     st.subheader("Composizione per paese e settore")
@@ -724,6 +736,10 @@ if sezione == "⏱️ Timing":
             fig_roll.update_layout(hovermode="x unified", margin=dict(t=20))
             st.plotly_chart(fig_roll, width="stretch")
             st.caption(
+                "Cosa significa per te: ogni punto è un possibile giorno d'ingresso; la nuvola mostra che "
+                "il **momento** in cui entri pesa sempre meno man mano che l'orizzonte si allunga."
+            )
+            st.caption(
                 f"{len(roll)} possibili giorni di partenza analizzati su ~{anni_storico:.1f} anni di storico. "
                 "⚠️ I rendimenti passati non garantiscono quelli futuri."
             )
@@ -865,6 +881,11 @@ if sezione == "🎯 Obiettivo":
             fig_obj.add_hline(y=obiettivo_eur, line_dash="dot", line_color="green", annotation_text="obiettivo")
             fig_obj.update_layout(hovermode="x unified", legend_title_text="")
             st.plotly_chart(fig_obj, width="stretch")
+            st.caption(
+                "Cosa significa per te: la banda mostra dove potrebbe arrivare il capitale nei vari scenari "
+                "(da pessimista a ottimista); la linea verde è l'obiettivo. Conta la **tendenza**, non il "
+                "singolo numero."
+            )
             st.caption("⚠️ Simulazione statistica (Monte Carlo) su ipotesi storiche: il futuro può essere diverso.")
 
 # === Costi (TER) e fiscalità ==============================================
