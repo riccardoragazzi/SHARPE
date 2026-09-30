@@ -594,9 +594,10 @@ def riepilogo_portafoglio(rendimenti: pd.DataFrame, pesi: pd.Series, orizzonte: 
 
     buono = (rischio != "alto" or orizzonte >= 7) and diversificazione in ("buona", "media")
     livello = "success" if buono else "warning"
+    vol_txt = f"{vol:.1%}".replace(".", ",")  # formato italiano: 10,0%
     testo = (
         f"Portafoglio con **{n_asset} asset**, diversificazione **{diversificazione}** e "
-        f"rischio **{rischio}** (volatilità annua {vol:.1%}). In sintesi: {coerenza}."
+        f"rischio **{rischio}** (volatilità annua {vol_txt}). In sintesi: {coerenza}."
     )
     return {
         "testo": testo, "livello": livello, "rischio": rischio,

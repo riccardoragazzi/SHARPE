@@ -59,28 +59,30 @@ SETTORI_IT = {
 }
 
 # Portafoglio di esempio iniziale (ETF reali su Borsa Italiana).
-DEFAULT_TICKERS = ["SWDA.MI", "EIMI.MI", "AGGH.MI"]
+DEFAULT_TICKERS = ["SWDA.MI", "EIMI.MI", "XGLE.MI"]
 DEFAULT_PESI = [50.0, 20.0, 30.0]
 
 # Portafogli "famosi" per il confronto nella pagina Builder (pesi che sommano a 1).
-# I due benchmark di riferimento usano ETF UCITS in EUR su Borsa Italiana (storia
-# dal 2009, stesso calendario degli ETF dell'utente, niente rischio cambio sulle
-# obbligazioni); gli altri sono allocazioni celebri americane, con ETF USA.
+# I due benchmark di riferimento usano ETF UCITS in EUR su Borsa Italiana (SWDA dal
+# 2009, XGLE = titoli di Stato area euro dal 2008: stesso calendario degli ETF
+# dell'utente, niente rischio cambio sulle obbligazioni); gli altri sono allocazioni
+# celebri americane, con ETF USA.
 PORTAFOGLI_FAMOSI = {
     "100% MSCI World": {"SWDA.MI": 1.0},
-    "60/40 (azioni/obbligazioni)": {"SWDA.MI": 0.60, "IEAG.MI": 0.40},
+    "60/40 (azioni/obbligazioni)": {"SWDA.MI": 0.60, "XGLE.MI": 0.40},
     "All Weather (Ray Dalio)": {"VTI": 0.30, "TLT": 0.40, "IEI": 0.15, "GLD": 0.075, "DBC": 0.075},
     "Golden Butterfly": {"VTI": 0.20, "IWN": 0.20, "TLT": 0.20, "SHY": 0.20, "GLD": 0.20},
     "Permanent Portfolio": {"VTI": 0.25, "TLT": 0.25, "SHY": 0.25, "GLD": 0.25},
 }
 
 # Portafogli "pronti" da caricare nel Builder, con ETF UCITS realmente
-# acquistabili (in EUR su Borsa Italiana / Xetra). Pesi in %.
+# acquistabili (in EUR su Borsa Italiana / Xetra). Pesi in %. Obbligazioni: XGLE
+# (titoli di Stato area euro, accumulazione, dati dal 2008 → storico lungo).
 PORTAFOGLI_PRONTI = {
-    "3 ETF pigro (Mondo + Emergenti + Obblig.)": {"SWDA.MI": 60.0, "EIMI.MI": 20.0, "AGGH.MI": 20.0},
-    "60/40 (azioni/obbligazioni)": {"SWDA.MI": 60.0, "AGGH.MI": 40.0},
-    "80/20 (azioni/obbligazioni)": {"SWDA.MI": 80.0, "AGGH.MI": 20.0},
-    "All-Weather (semplificato)": {"SWDA.MI": 30.0, "AGGH.MI": 55.0, "SGLD.MI": 15.0},
+    "3 ETF pigro (Mondo + Emergenti + Obblig.)": {"SWDA.MI": 60.0, "EIMI.MI": 20.0, "XGLE.MI": 20.0},
+    "60/40 (azioni/obbligazioni)": {"SWDA.MI": 60.0, "XGLE.MI": 40.0},
+    "80/20 (azioni/obbligazioni)": {"SWDA.MI": 80.0, "XGLE.MI": 20.0},
+    "All-Weather (semplificato)": {"SWDA.MI": 30.0, "XGLE.MI": 55.0, "SGLD.MI": 15.0},
     "All-world 100% azioni": {"VWCE.DE": 100.0},
 }
 
@@ -241,11 +243,11 @@ def _num_it(s: str) -> str:
     return s.replace(",", "§").replace(".", ",").replace("§", ".")
 
 
-def fmt_pct(x, dec: int = 2) -> str:
-    """Percentuale in formato italiano, es. 0.1272 -> '12,72%'."""
+def fmt_pct(x, dec: int = 2, segno: bool = False) -> str:
+    """Percentuale in formato italiano, es. 0.1272 -> '12,72%' (con ``segno``: '+12,72%')."""
     if x is None or (isinstance(x, float) and pd.isna(x)):
         return "n/d"
-    return _num_it(f"{x * 100:,.{dec}f}") + "%"
+    return _num_it(f"{x * 100:{'+' if segno else ''},.{dec}f}") + "%"
 
 
 def fmt_eur(x, dec: int = 2) -> str:
@@ -260,6 +262,20 @@ def fmt_num(x, dec: int = 2) -> str:
     if x is None or (isinstance(x, float) and pd.isna(x)):
         return "n/d"
     return _num_it(f"{x:,.{dec}f}")
+
+
+# Date degli assi in formato italiano numerico (plotly ha i nomi dei mesi solo in
+# inglese): il formato cambia con lo zoom, dal giorno all'anno.
+_FORMATI_DATA = [
+    dict(dtickrange=[None, "M1"], value="%d/%m/%Y"),
+    dict(dtickrange=["M1", "M6"], value="%m/%Y"),  # fino a 6 mesi; da 1 anno solo l'anno
+    dict(dtickrange=["M12", None], value="%Y"),
+]
+
+
+def assi_data_it(fig):
+    """Assi x con date in formato italiano (solo per grafici con date sull'asse x)."""
+    return fig.update_xaxes(tickformatstops=_FORMATI_DATA, hoverformat="%d/%m/%Y")
 
 
 def formatta_metriche(df: pd.DataFrame):
@@ -714,16 +730,17 @@ def inietta_css_mobile():
     )
 
 
-def mostra_descrizione_app():
-    """Descrizione sintetica dell'app: cos'è e cosa puoi farci.
+def mostra_intro():
+    """Riquadro unico «cos'è Sharpe e come si usa» (descrizione + guida in 3 passi).
 
     Serve a tre scopi insieme: (1) chi arriva la prima volta capisce subito l'app;
     (2) un'AI con navigazione che apre il link coglie al volo di cosa si tratta e
     può dare un parere sensato; (3) Google usa questo testo in cima come descrizione
-    nei risultati di ricerca. Espansa al primo accesso, poi richiudibile.
+    nei risultati di ricerca. Espanso solo al primo accesso, così non spinge lo
+    strumento in fondo alla pagina.
     """
-    espandi = not ss.get("descrizione_vista", False)
-    with st.expander("ℹ️ Cos'è Sharpe e cosa puoi fare", expanded=espandi):
+    espandi = not ss.get("intro_vista", False)
+    with st.expander("ℹ️ Cos'è Sharpe e come si usa", expanded=espandi):
         st.markdown(
             "**Sharpe** è un'app gratuita e **didattica** per analizzare **ETF e indici** e "
             "costruire un **portafoglio** di lungo periodo (pensata per investitori passivi). "
@@ -738,29 +755,21 @@ def mostra_descrizione_app():
             "- 💶 **PAC** (versamenti periodici), 🎯 **Obiettivo** di capitale (proiezioni "
             "Monte Carlo), 💰 **costi e tasse**, 💸 **dividendi**, ♻️ **ribilanciamento**, "
             "🧮 **ottimizzazione**.\n"
-            "- 📈 **Analisi tecnica** di qualunque asset: candele, volumi, medie mobili, RSI.\n\n"
-            "⚠️ Strumento di **analisi/educativo**: non è consulenza finanziaria. Dati da Yahoo Finance."
-        )
-        ss.descrizione_vista = True
-
-
-def mostra_onboarding():
-    """Mini guida «come si usa in 3 passi» (espansa solo la prima volta)."""
-    espandi = not ss.get("onboarding_visto", False)
-    with st.expander("👋 Come si usa in 3 passi", expanded=espandi):
-        st.markdown(
+            "- 📈 **Analisi tecnica** di qualunque asset (modalità **Avanzato**): candele, volumi, "
+            "medie mobili, RSI.\n\n"
+            "**Come si usa in 3 passi:**\n"
             "1. **Costruisci il portafoglio** (pagina 🧱 *Builder*): cerca ETF per nome / ticker / ISIN "
             "oppure carica un **portafoglio pronto**, poi regola i pesi.\n"
             "2. **Leggi le analisi**: rischio e diversificazione (paesi/settori), e i piani — "
             "**💶 PAC** (versamenti periodici) e **🎯 Obiettivo** (quanto versare per una cifra).\n"
             "3. **Approfondisci un singolo asset** nella pagina **📈 Analisi tecnica** "
-            "(anche asset non in portafoglio).\n\n"
+            "(scegli la modalità **Avanzato**; anche asset non in portafoglio).\n\n"
             "Nella **barra laterale** imposti periodo, orizzonte, valuta e inflazione. "
             "📱 Da telefono: apri il menu **☰** in alto a sinistra per i parametri; nel "
-            "Builder scegli cosa vedere dal menu a tendina **«Sezione»**. "
-            "Tutto è a scopo **didattico**, non è consulenza finanziaria."
+            "Builder scegli cosa vedere dal menu a tendina **«Sezione»**.\n\n"
+            "⚠️ Strumento di **analisi/educativo**: non è consulenza finanziaria. Dati da Yahoo Finance."
         )
-        ss.onboarding_visto = True
+        ss.intro_vista = True
 
 
 def mostra_glossario():
@@ -1083,7 +1092,7 @@ def mostra_semaforo_mercato():
                       help=f"Tempo investito: {fmt_pct(bt['quota_investito'], 0)} dei giorni.")
             fig_bt = px.line(bt["serie"], labels={"value": "Indice (base 100)", "index": "Data", "variable": ""})
             fig_bt.update_layout(hovermode="x unified", legend_title_text="", margin=dict(t=20), height=300)
-            st.plotly_chart(fig_bt, width="stretch", key="backtest_semaforo")
+            st.plotly_chart(assi_data_it(fig_bt), width="stretch", key="backtest_semaforo")
             st.caption(
                 f"Backtest su {usato} ({bt['serie'].index.min():%m/%Y} → {bt['serie'].index.max():%m/%Y}), "
                 "decidendo ogni sera col semaforo di quel giorno; fuori dal mercato = liquidità allo 0%. "
@@ -1114,7 +1123,7 @@ def mostra_lettura_statistica(prezzo: pd.Series, rendimenti: pd.Series, risk_fre
     premio = val.get("premio", np.nan)
     a.metric(
         "Prezzo vs media storica", val["giudizio_breve"],
-        f"{premio:+.1%}" if premio is not None and not np.isnan(premio) else None,
+        fmt_pct(premio, 1, segno=True) if premio is not None and not np.isnan(premio) else None,
         delta_color="off",
     )
     b.metric("RSI (14)", f"{fmt_num(rsi_val, 0)}" if not np.isnan(rsi_val) else "—",

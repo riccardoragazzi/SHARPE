@@ -1,7 +1,11 @@
-# Dipendenze del progetto Sharpe (Python 3.11+)
-yfinance>=0.2.40
-pandas>=2.1
-numpy>=1.26
-plotly>=5.18
-streamlit>=1.30
-scipy>=1.11
+# Dipendenze del progetto Sharpe — richiede Python 3.12+ (consigliato 3.13).
+# Versioni FISSE (quelle testate): così un aggiornamento automatico di una libreria
+# non rompe l'app online. Per aggiornare: cambia le versioni insieme, prova in locale
+# (python test_metrics.py e avvio dell'app) e solo dopo carica il file.
+yfinance==1.7.0
+pandas==3.0.6
+numpy==2.5.3
+plotly==7.1.0
+streamlit==1.64.0
+scipy==1.18.1
+fpdf2==2.8.9

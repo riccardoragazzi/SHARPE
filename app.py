@@ -37,16 +37,9 @@ st.caption(
     "diversificazione — semplice, in italiano e **didattico**."
 )
 
-# Descrizione «cos'è e cosa puoi fare» (utile a nuovi utenti, AI e indicizzazione Google).
-cm.mostra_descrizione_app()
-
-st.caption(
-    "⚠️ Strumento a scopo di **analisi e didattico**. Non è consulenza finanziaria "
-    "né raccomandazione di investimento. Dati da Yahoo Finance: possibili errori o ritardi."
-)
-
-# Mini guida iniziale (espansa solo la prima volta).
-cm.mostra_onboarding()
+# «Cos'è e come si usa» in un solo riquadro, aperto solo alla prima visita (utile a nuovi
+# utenti, AI e indicizzazione Google). Il disclaimer completo è nel footer di ogni pagina.
+cm.mostra_intro()
 
 avanzato = st.session_state.get("modo_ui_val", "Base") == "Avanzato"
 

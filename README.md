@@ -33,7 +33,7 @@ L'app è divisa in due sezioni (menu a lato):
   drawdown, cumulato; volatilità dalla **covarianza** (σₚ=√(wᵀΣw)); **heatmap di
   correlazione** (su rendimenti settimanali) con **alert su asset troppo
   correlati**; **contributo al rischio**; confronto sempre presente con
-  **MSCI World** e **60/40** (ETF in euro: SWDA, IEAG), anche sullo Sharpe.
+  **MSCI World** e **60/40** (ETF in euro: SWDA, XGLE), anche sullo Sharpe.
 - **🌍 Allocazione**: per **classe di attività** (azioni/obbligazioni/liquidità,
   auto da Yahoo), per **paese** e **settore** (auto e/o manuale / CSV).
 - **⏱️ Timing** (rolling returns): rendimento **% annuo** per ogni giorno di
@@ -86,8 +86,8 @@ Sharpe/
 
 ## Requisiti
 
-- Python **3.11+**
-- I pacchetti elencati in `requirements.txt`
+- Python **3.12+** (consigliato 3.13)
+- I pacchetti elencati in `requirements.txt` (versioni fisse, quelle testate)
   (`yfinance`, `pandas`, `numpy`, `plotly`, `streamlit`, `scipy`, `fpdf2`)
 - Connessione a Internet (prezzi da Yahoo Finance; tassi e inflazione da Eurostat)
 
@@ -209,7 +209,7 @@ SWDA.MI,settore,Tecnologia,0.24
 - **Timing (rolling returns)**: per ogni data di partenza, CAGR su una finestra
   fissa (1/3/5/10 anni) a partire dall'indice di ricchezza del portafoglio.
 - **Confronto portafogli famosi**: 100% MSCI World e 60/40 con ETF UCITS in euro
-  (SWDA, IEAG); All Weather, Golden Butterfly e Permanent Portfolio con ETF proxy
+  (SWDA, XGLE); All Weather, Golden Butterfly e Permanent Portfolio con ETF proxy
   USA (es. All Weather ≈ 30% azioni, 55% obbligazioni, 7,5% oro, 7,5% materie
   prime); le serie sono allineate sul periodo comune e (se attiva) convertite
   nella valuta base.

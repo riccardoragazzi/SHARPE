@@ -37,7 +37,7 @@ assert np.isnan(mtr.inflazione_annua_media(hicp, "2010-01-01", "2022-01-01"))  #
 # 4) Aliquota pro-quota sui titoli di Stato.
 assert dsc.aliquota_default("SWDA.MI") == 26.0
 assert dsc.aliquota_default("AGGH.MI") == 18.6
-assert dsc.aliquota_default("IEGA.MI") == 12.5
+assert dsc.aliquota_default("XGLE.MI") == 12.5
 
 # 5) Obiettivo: con mesi storici tutti uguali la simulazione è deterministica,
 #    e il valore netto (dopo tasse sul guadagno) coincide esattamente con l'obiettivo.

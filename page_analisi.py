@@ -259,7 +259,7 @@ config = {
     "displaylogo": False,
 }
 
-st.plotly_chart(fig, width="stretch", config=config)
+st.plotly_chart(cm.assi_data_it(fig), width="stretch", config=config)
 st.caption(
     "Cosa significa per te: ogni candela è una giornata (verde = chiusura sopra l'apertura, rossa = "
     "sotto); le **medie mobili** mostrano la tendenza di fondo e l'**RSI** se l'asset è 'tirato'. Sono "

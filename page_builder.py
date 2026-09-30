@@ -95,7 +95,9 @@ with st.container(border=True):
         col1, col2, col3 = st.columns([5, 4, 1])
         _iz = cm.isin_di(t)
         col1.markdown(f"**{nome}**  \n`{t}`" + (f" · ISIN `{_iz}`" if _iz else ""))
-        col2.slider("Peso %", min_value=0.0, max_value=100.0, step=1.0, key=f"w_{t}", label_visibility="collapsed")
+        # Campo numerico (non slider): valori esatti e tastiera numerica da telefono.
+        col2.number_input("Peso %", min_value=0.0, max_value=100.0, step=1.0, format="%.1f",
+                          key=f"w_{t}", label_visibility="collapsed")
         col3.button("🗑", key=f"del_{t}", on_click=cm.cb_rimuovi, args=(t,))
         pesi_correnti[t] = ss[f"w_{t}"]
 
@@ -108,6 +110,11 @@ with st.container(border=True):
     azione3.button("🧹 Svuota", on_click=cm.cb_svuota, width="stretch")
     tot = sum(pesi_correnti.values())
     azione4.metric("Somma pesi", f"{cm.fmt_num(tot, 1)}%", help="I pesi vengono comunque normalizzati a 100% per i calcoli.")
+    if abs(tot - 100.0) > 0.5:
+        st.caption(
+            f"⚠️ La somma è **{cm.fmt_num(tot, 1)}%**: nei calcoli i pesi vengono riscalati a 100%. "
+            "Premi **🎯 Normalizza a 100%** per vederli già riscalati."
+        )
 
 tickers = sel["Ticker"].tolist()
 pesi_input = pd.Series([pesi_correnti[t] for t in tickers], index=tickers)
@@ -239,8 +246,6 @@ with st.expander("Come leggo questo riepilogo?"):
         "_È una descrizione statistica/didattica, non un consiglio di investimento._"
     )
 
-cm.mostra_glossario()
-
 # ---------------------------------------------------------------------------
 # Tab di analisi del portafoglio
 # ---------------------------------------------------------------------------
@@ -263,9 +268,12 @@ if "modo_ui" not in ss:
 def _salva_modo():
     ss.modo_ui_val = ss.modo_ui
 
-modo_ui = st.radio(
+# Modalità e sezione sulla stessa riga, subito dopo il riepilogo (su telefono vanno a capo).
+_col_modo, _col_sez = st.columns([1, 2])
+modo_ui = _col_modo.radio(
     "Modalità", ["Base", "Avanzato"], horizontal=True, key="modo_ui", on_change=_salva_modo,
-    help="Base = l'essenziale per un investitore passivo. Avanzato = tutte le sezioni.",
+    help="Base = l'essenziale per un investitore passivo. Avanzato = tutte le sezioni, "
+         "l'indicatore di mercato e la pagina Analisi tecnica.",
 )
 ss.modo_ui_val = modo_ui
 opzioni_sez = SEZIONI_BASE if modo_ui == "Base" else SEZIONI
@@ -279,7 +287,7 @@ if ss.get("sezione_builder") not in opzioni_sez:
 def _salva_sezione():
     ss.sezione_val = ss.sezione_builder
 
-sezione = st.selectbox(
+sezione = _col_sez.selectbox(
     "📂 Sezione da visualizzare",
     opzioni_sez,
     key="sezione_builder", on_change=_salva_sezione,
@@ -291,8 +299,7 @@ ss.sezione_val = sezione
 # === Report (vista di sintesi unica) =======================================
 if sezione == "📋 Report":
     st.subheader("📋 Report del portafoglio")
-    _box_r = {"success": st.success, "warning": st.warning}.get(riep["livello"], st.info)
-    _box_r("🧭 " + riep["testo"])
+    # (Il riepilogo 🧭 è già visibile sopra il selettore della sezione.)
 
     r1, r2, r3 = st.columns(3)
     r1.metric("Rend. annuo (CAGR)", cm.fmt_pct(met_pf['Rend. annuo (CAGR)']))
@@ -330,11 +337,11 @@ if sezione == "📋 Report":
     fig_r = px.line(_cum_r, labels={"value": "Indice (base 100)", "index": "Data", "variable": "Serie"})
     fig_r.update_traces(selector=dict(name="Il mio portafoglio"), line=dict(width=3.4, color="black"))
     fig_r.update_layout(hovermode="x unified", legend_title_text="Serie", margin=dict(t=20))
-    st.plotly_chart(fig_r, width="stretch")
+    st.plotly_chart(cm.assi_data_it(fig_r), width="stretch")
     st.caption(
         "Cosa significa per te: se la linea nera (il tuo portafoglio) sta sopra i benchmark, storicamente "
         "ha reso di più; se sta sotto, di meno. Conta l'andamento di lungo periodo, non i singoli mesi. "
-        "Benchmark con ETF in euro: MSCI World (SWDA) e 60% SWDA + 40% obbligazioni euro (IEAG)."
+        "Benchmark con ETF in euro: MSCI World (SWDA) e 60% SWDA + 40% titoli di Stato area euro (XGLE)."
     )
     # Lo Sharpe non ha una soglia assoluta: si legge a confronto, sullo stesso periodo.
     if _rend_r.shape[1] > 1:
@@ -351,7 +358,7 @@ if sezione == "📋 Report":
     fig_ddr = px.area(dd_r, labels={"value": "Drawdown", "index": "Data"})
     fig_ddr.update_yaxes(tickformat=".0%")
     fig_ddr.update_layout(showlegend=False, margin=dict(t=20))
-    st.plotly_chart(fig_ddr, width="stretch")
+    st.plotly_chart(cm.assi_data_it(fig_ddr), width="stretch")
     st.caption(
         "Cosa significa per te: mostra quanto saresti stato 'sotto' rispetto al picco precedente. "
         "Le discese fanno parte del gioco: l'importante è l'orizzonte lungo."
@@ -433,7 +440,7 @@ if sezione == "📈 Singoli asset":
     cum = mtr.serie_cumulata(rendimenti, base=100.0).rename(columns=etichette_grafico)
     fig = px.line(cum, labels={"value": "Indice (base 100)", "index": "Data", "variable": "Asset"})
     fig.update_layout(legend_title_text="Asset", hovermode="x unified")
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(cm.assi_data_it(fig), width="stretch")
     st.caption(
         "Cosa significa per te: tutte le linee partono da 100, così confronti la **crescita** dei vari "
         "asset a parità di partenza (il prezzo assoluto non conta)."
@@ -444,7 +451,7 @@ if sezione == "📈 Singoli asset":
     fig_dd = px.area(dd, labels={"value": "Drawdown", "index": "Data", "variable": "Asset"})
     fig_dd.update_layout(legend_title_text="Asset", hovermode="x unified")
     fig_dd.update_yaxes(tickformat=".0%")
-    st.plotly_chart(fig_dd, width="stretch")
+    st.plotly_chart(cm.assi_data_it(fig_dd), width="stretch")
     st.caption(
         "Cosa significa per te: quanto ogni asset è sceso rispetto al suo massimo precedente. Più la "
         "curva scende, più forti sono stati i cali da sopportare lungo il percorso."
@@ -537,7 +544,7 @@ if sezione == "💼 Portafoglio":
     fig_cmp.update_traces(line=dict(width=1.2))
     fig_cmp.update_traces(selector=dict(name="PORTAFOGLIO"), line=dict(width=3.5, color="black"))
     fig_cmp.update_layout(hovermode="x unified")
-    st.plotly_chart(fig_cmp, width="stretch")
+    st.plotly_chart(cm.assi_data_it(fig_cmp), width="stretch")
     st.caption(
         "Cosa significa per te: la linea nera è il **tuo portafoglio**; le altre sono i singoli asset. "
         "Se la nera è più «liscia» dei singoli, la diversificazione sta smorzando le oscillazioni."
@@ -559,11 +566,11 @@ if sezione == "💼 Portafoglio":
         fig_b.update_traces(line=dict(width=1.4))
         fig_b.update_traces(selector=dict(name="Il mio portafoglio"), line=dict(width=3.2, color="black"))
         fig_b.update_layout(hovermode="x unified")
-        st.plotly_chart(fig_b, width="stretch")
+        st.plotly_chart(cm.assi_data_it(fig_b), width="stretch")
         st.dataframe(cm.formatta_metriche(mtr.metriche_asset(df_bench, risk_free)), width="stretch")
         st.caption(
             "Riferimenti con ETF in euro: **100% MSCI World** (SWDA, azioni dei paesi sviluppati) e "
-            "**60/40** (60% SWDA, 40% obbligazioni euro aggregate IEAG). Allineati sul periodo comune."
+            "**60/40** (60% SWDA, 40% titoli di Stato area euro XGLE). Allineati sul periodo comune."
         )
     else:
         st.caption("Benchmark non disponibili per questo periodo.")
@@ -849,7 +856,7 @@ if sezione == "⏱️ Timing":
             fig_roll.update_yaxes(tickformat=".0%", title_text=f"Rendimento medio annuo (finestra {anni_fin} anni)")
             fig_roll.update_xaxes(title_text="Giorno in cui avresti investito")
             fig_roll.update_layout(hovermode="x unified", margin=dict(t=20))
-            st.plotly_chart(fig_roll, width="stretch")
+            st.plotly_chart(cm.assi_data_it(fig_roll), width="stretch")
             st.caption(
                 "Cosa significa per te: ogni punto è un possibile giorno d'ingresso; la nuvola mostra che "
                 "il **momento** in cui entri pesa sempre meno man mano che l'orizzonte si allunga."
@@ -882,7 +889,7 @@ if sezione == "⏱️ Timing":
                 _cc1.metric("Sempre investito", f"{cm.fmt_pct(_cmg['tot'], 0)}",
                             help="Rendimento totale dell'intero storico, restando sempre investito.")
                 _cc2.metric("Senza i 10 giorni migliori", f"{cm.fmt_pct(_cmg['tot_senza'], 0)}",
-                            f"{_cmg['tot_senza'] - _cmg['tot']:+.0%}",
+                            cm.fmt_pct(_cmg['tot_senza'] - _cmg['tot'], 0, segno=True),
                             help="Stesso periodo, ma saltando i 10 giorni di rialzo più forti.")
                 st.caption(
                     "Cosa significa per te: gran parte del guadagno arriva in **pochissimi giorni**, "
@@ -925,14 +932,14 @@ if sezione == "💶 PAC":
             m1.metric("Capitale versato", f"{cm.fmt_num(res_pac['versato'], 0)} {val}",
                       help="La somma di tutti i tuoi versamenti.")
             m2.metric("Valore finale (PAC)", f"{cm.fmt_num(res_pac['valore_finale'], 0)} {val}",
-                      f"{res_pac['guadagno_pct']:+.1%}", help="Quanto varrebbe oggi il PAC, e il guadagno %.")
+                      cm.fmt_pct(res_pac['guadagno_pct'], 1, segno=True), help="Quanto varrebbe oggi il PAC, e il guadagno %.")
             m3.metric("Investimento unico", f"{cm.fmt_num(res_pac['lump_finale'], 0)} {val}",
-                      f"{res_pac['lump_guadagno_pct']:+.1%}",
+                      cm.fmt_pct(res_pac['lump_guadagno_pct'], 1, segno=True),
                       help="Se avessi investito tutto il capitale finale all'inizio, in un colpo solo.")
             m4.metric("N. versamenti", f"{res_pac['n_versamenti']}", help="Quante volte avresti versato.")
             fig_pac = px.line(res_pac["serie"], labels={"value": f"Valore ({val})", "index": "Data", "variable": ""})
             fig_pac.update_layout(hovermode="x unified", legend_title_text="")
-            st.plotly_chart(fig_pac, width="stretch")
+            st.plotly_chart(cm.assi_data_it(fig_pac), width="stretch")
             st.caption(
                 "Il PAC riduce il rischio di «entrare nel momento sbagliato»; l'investimento unico, però, "
                 "storicamente rende spesso di più perché i soldi restano investiti più a lungo. "
@@ -1216,7 +1223,7 @@ if sezione == "♻️ Ribilanciamento":
         else:
             fig_rib = px.line(serie_rib, labels={"value": "Indice (base 100)", "index": "Data", "variable": "Strategia"})
             fig_rib.update_layout(hovermode="x unified")
-            st.plotly_chart(fig_rib, width="stretch")
+            st.plotly_chart(cm.assi_data_it(fig_rib), width="stretch")
             st.caption(
                 "Cosa significa per te: se le due linee sono vicine, ribilanciare cambia poco; il "
                 "ribilanciamento serve soprattutto a **tenere il rischio sotto controllo**, non per forza "
@@ -1415,7 +1422,7 @@ if sezione == "🆚 Confronto":
     txt_bench = st.text_input(
         "Altri ticker/indici da confrontare (separati da virgola)",
         value="",
-        placeholder="es. CSPX.MI, ^GSPC, SWDA.MI",
+        placeholder="es. CSSPX.MI, ^GSPC, SWDA.MI",
     )
     bench_tickers = [t.strip().upper() for t in txt_bench.replace(";", ",").split(",") if t.strip()]
 
@@ -1456,13 +1463,13 @@ if sezione == "🆚 Confronto":
         fig_conf.update_traces(line=dict(width=1.4))
         fig_conf.update_traces(selector=dict(name="Il mio portafoglio"), line=dict(width=3.6, color="black"))
         fig_conf.update_layout(hovermode="x unified", legend_title_text="Serie")
-        st.plotly_chart(fig_conf, width="stretch")
+        st.plotly_chart(cm.assi_data_it(fig_conf), width="stretch")
 
         st.markdown("**Statistiche a confronto** (sul periodo comune)")
         met_conf = mtr.metriche_asset(df_rend, risk_free)
         st.dataframe(cm.formatta_metriche(met_conf), width="stretch")
         st.caption(
-            "100% MSCI World e 60/40 usano ETF in euro (SWDA, IEAG); All Weather, Golden Butterfly e "
+            "100% MSCI World e 60/40 usano ETF in euro (SWDA, XGLE); All Weather, Golden Butterfly e "
             "Permanent Portfolio sono allocazioni americane ricostruite con ETF USA (in dollari, "
             "convertiti se attivo): possono differire dalle versioni «originali». ⚠️ Analisi storica a "
             "scopo didattico, non un consiglio di investimento."
@@ -1537,5 +1544,7 @@ if sezione == "🤖 Assistente":
         with st.chat_message(_ruolo, avatar="🤖" if _ruolo == "assistant" else "🧑"):
             st.markdown(_testo)
 
+# Glossario (materiale di consultazione) in fondo, poi il footer col disclaimer.
+cm.mostra_glossario()
 # A3 — footer disclaimer persistente (sotto qualunque sezione attiva).
 cm.mostra_footer_disclaimer()
