@@ -166,7 +166,7 @@ prezzi = ris.prezzi
 tickers_ok = list(prezzi.columns)
 pesi = mtr.normalizza_pesi(pesi_input, tickers_ok)
 rendimenti = mtr.rendimenti_giornalieri(prezzi)
-risk_free = ss.risk_free
+risk_free = cm.risk_free_storico()  # serie Euribor storica (EUR) o valore manuale
 
 nomi = {t: ss.selezionati.set_index("Ticker")["Nome"].get(t, t) for t in tickers_ok}
 nomi_corti = {t: cm.etichetta_corta(nomi[t]) for t in tickers_ok}
@@ -303,34 +303,47 @@ if sezione == "📋 Report":
     r5.metric("Max drawdown", cm.fmt_pct(met_pf['Max drawdown']))
     r6.metric("Rend. cumulato", cm.fmt_pct(met_pf['Rend. cumulato']))
 
-    _infl_r = ss.get("inflazione", 0.0)
-    if _infl_r > 0 and not pd.isna(met_pf["Rend. annuo (CAGR)"]):
-        _cagr_reale = (1 + met_pf["Rend. annuo (CAGR)"]) / (1 + _infl_r) - 1
+    _txt_reale = cm.caption_rendimento_reale(met_pf["Rend. annuo (CAGR)"], prezzi.index)
+    if _txt_reale:
+        st.caption(_txt_reale)
+    if isinstance(risk_free, pd.Series):
+        _rf_medio = float(mtr.rf_giornaliero(risk_free, rendimenti.index).mean()) * mtr.GIORNI_BORSA
         st.caption(
-            f"Al netto di un'inflazione del {cm.fmt_pct(_infl_r, 1)}/anno, il rendimento **reale** "
-            f"(potere d'acquisto) è **{cm.fmt_pct(_cagr_reale)}/anno**."
+            f"Sharpe e Sortino usano il risk-free **effettivo** del periodo (Euribor 3 mesi, "
+            f"media {cm.fmt_pct(_rf_medio, 2)}/anno, fonte Eurostat)."
         )
 
     # Andamento del portafoglio vs benchmark (base 100).
     st.markdown("**Andamento: il tuo portafoglio vs benchmark** (base 100)")
     serie_pf_r = mtr.serie_rendimenti_portafoglio(rendimenti, pesi)
-    dati_cum = {"Il mio portafoglio": mtr.serie_cumulata(serie_pf_r, base=100.0)}
+    dati_rend = {"Il mio portafoglio": serie_pf_r}
     with st.spinner("Carico i benchmark di confronto..."):
         for _bench in ("100% MSCI World", "60/40 (azioni/obbligazioni)"):
             _s, _ = cm.rendimenti_portafoglio_famoso(
                 _bench, ss.period, ss.data_inizio, ss.data_fine, ss.valuta_base, ss.converti
             )
             if not _s.empty:
-                dati_cum[_bench] = mtr.serie_cumulata(_s, base=100.0)
-    _cum_r = pd.DataFrame(dati_cum).dropna()
+                dati_rend[_bench] = _s
+    # Allinea PRIMA i rendimenti sulle date comuni, poi cumula: così tutte partono da 100.
+    _rend_r = pd.DataFrame(dati_rend).dropna()
+    _cum_r = mtr.serie_cumulata(_rend_r, base=100.0)
     fig_r = px.line(_cum_r, labels={"value": "Indice (base 100)", "index": "Data", "variable": "Serie"})
     fig_r.update_traces(selector=dict(name="Il mio portafoglio"), line=dict(width=3.4, color="black"))
     fig_r.update_layout(hovermode="x unified", legend_title_text="Serie", margin=dict(t=20))
     st.plotly_chart(fig_r, width="stretch")
     st.caption(
         "Cosa significa per te: se la linea nera (il tuo portafoglio) sta sopra i benchmark, storicamente "
-        "ha reso di più; se sta sotto, di meno. Conta l'andamento di lungo periodo, non i singoli mesi."
+        "ha reso di più; se sta sotto, di meno. Conta l'andamento di lungo periodo, non i singoli mesi. "
+        "Benchmark con ETF in euro: MSCI World (SWDA) e 60% SWDA + 40% obbligazioni euro (IEAG)."
     )
+    # Lo Sharpe non ha una soglia assoluta: si legge a confronto, sullo stesso periodo.
+    if _rend_r.shape[1] > 1:
+        _sh = {c: mtr.sharpe(_rend_r[c], risk_free) for c in _rend_r.columns}
+        st.caption(
+            "📏 **Sharpe a confronto** (stesso periodo): "
+            + " · ".join(f"{c} **{cm.fmt_num(v)}**" for c, v in _sh.items())
+            + ". Più alto = più rendimento per ogni unità di rischio."
+        )
 
     # Drawdown del portafoglio (quanto sei stato sotto il picco precedente).
     st.markdown("**Drawdown del portafoglio** (distanza dal massimo precedente)")
@@ -437,10 +450,63 @@ if sezione == "📈 Singoli asset":
         "curva scende, più forti sono stati i cali da sopportare lungo il percorso."
     )
 
+    # Lenti di lungo periodo per singolo asset (recupero dai cali + finestre di 1 anno):
+    # le stesse già usate per il portafoglio (📋 Report, ⏱️ Timing), qui per ogni asset,
+    # riusando le funzioni esistenti e calcolando sulla finestra già caricata sopra.
+    st.subheader("🩹 Recupero dai cali")
+    _righe_rec = {}
+    for t in tickers_ok:
+        d = mtr.statistiche_drawdown(rendimenti[t].dropna())
+        if not d.get("valido"):
+            _righe_rec[nomi[t]] = {"Calo massimo": "—", "Mesi sotto il picco (max)": "—",
+                                   "Sotto il picco ora?": "—"}
+            continue
+        if d["in_perdita_ora"] and d["mesi_perdita_ora"] >= 1:
+            _ora = f"Sì (~{cm.fmt_num(d['mesi_perdita_ora'], 0)} mesi)"
+        else:
+            _ora = "No"
+        _righe_rec[nomi[t]] = {
+            "Calo massimo": cm.fmt_pct(d["max_dd"], 1),
+            "Mesi sotto il picco (max)": cm.fmt_num(d["durata_max_mesi"], 0),
+            "Sotto il picco ora?": _ora,
+        }
+    st.dataframe(pd.DataFrame(_righe_rec).T, width="stretch")
+    st.caption(
+        "Cosa significa per te: oltre a *quanto* è sceso ogni asset, mostra **per quanto tempo** è "
+        "rimasto sotto il massimo precedente. Dopo un calo servono spesso **mesi o anni** per tornare "
+        "in pari: conta l'orizzonte lungo, non il singolo anno."
+    )
+
+    st.subheader("📈 Finestre di 1 anno (storico mostrato)")
+    _righe_fin = {}
+    for t in tickers_ok:
+        roll = mtr.rolling_rendimenti_annualizzati(rendimenti[t].dropna(), 1)
+        if roll.empty:
+            _righe_fin[nomi[t]] = {"Peggiore": "—", "Mediana": "—", "Migliore": "—",
+                                   "Finestre positive": "—"}
+            continue
+        _righe_fin[nomi[t]] = {
+            "Peggiore": cm.fmt_pct(float(roll.min())),
+            "Mediana": cm.fmt_pct(float(roll.median())),
+            "Migliore": cm.fmt_pct(float(roll.max())),
+            "Finestre positive": cm.fmt_pct(float((roll > 0).mean()), 0),
+        }
+    st.dataframe(pd.DataFrame(_righe_fin).T, width="stretch")
+    st.caption(
+        "Cosa significa per te: se avessi investito in un **giorno qualunque** e tenuto per 1 anno, "
+        "tra il risultato peggiore e il migliore quanto avresti reso — e quante volte saresti finito "
+        "in positivo. È l'idea «**time in market** batte **timing the market**»: conta il tempo in cui "
+        "resti investito, non l'azzeccare il momento. Calcolato sull'orizzonte mostrato sopra."
+    )
+
 # === Portafoglio ===========================================================
 if sezione == "💼 Portafoglio":
     st.subheader("Metriche del portafoglio")
-    st.caption("Pesi normalizzati: " + ", ".join(f"{nomi[t]} {cm.fmt_pct(p, 1)}" for t, p in pesi.items()))
+    st.caption(
+        "Pesi normalizzati: " + ", ".join(f"{nomi[t]} {cm.fmt_pct(p, 1)}" for t, p in pesi.items())
+        + " — mantenuti **costanti** nel tempo (ribilanciamento continuo, ipotesi standard). "
+        "«Compra e tieni» e ribilanciamento annuale: sezione ♻️ Ribilanciamento."
+    )
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Rend. annuo (CAGR)", f"{cm.fmt_pct(met_pf['Rend. annuo (CAGR)'])}",
@@ -448,7 +514,8 @@ if sezione == "💼 Portafoglio":
     c2.metric("Volatilità (covarianza)", f"{cm.fmt_pct(met_pf['Volatilità annua (covarianza)'])}",
               help="Quanto oscilla il valore: <8% basso, 8–15% medio, >15% alto.")
     c3.metric("Sharpe", f"{cm.fmt_num(met_pf['Sharpe'], 2)}",
-              help="Rendimento per unità di rischio: >1 buono, >2 ottimo, <0 il rischio non ha pagato.")
+              help="Rendimento per unità di rischio. Non ha una soglia assoluta: confrontalo coi benchmark "
+                   "qui sotto (stesso periodo). <0 = il rischio non ha pagato.")
     c4.metric("Sortino", f"{cm.fmt_num(met_pf['Sortino'], 2)}",
               help="Come lo Sharpe ma conta solo le oscillazioni verso il basso (le perdite).")
     c5, c6, c7 = st.columns(3)
@@ -458,13 +525,9 @@ if sezione == "💼 Portafoglio":
               help="Guadagno totale nel periodo analizzato.")
     c7.metric("Volatilità (serie)", f"{cm.fmt_pct(met_pf['Volatilità annua (serie)'])}",
               help="Volatilità calcolata sui rendimenti del portafoglio (di norma uguale a quella da covarianza).")
-    _infl = ss.get("inflazione", 0.0)
-    if _infl > 0 and not pd.isna(met_pf["Rend. annuo (CAGR)"]):
-        cagr_reale = (1 + met_pf["Rend. annuo (CAGR)"]) / (1 + _infl) - 1
-        st.caption(
-            f"Rendimento **reale** (al netto di un'inflazione del {cm.fmt_pct(_infl, 1)}/anno): "
-            f"**{cm.fmt_pct(cagr_reale)}/anno** — la crescita effettiva del potere d'acquisto."
-        )
+    _txt_reale = cm.caption_rendimento_reale(met_pf["Rend. annuo (CAGR)"], prezzi.index)
+    if _txt_reale:
+        st.caption(_txt_reale)
 
     st.subheader("Portafoglio vs singoli asset (base 100)")
     serie_pf = mtr.serie_rendimenti_portafoglio(rendimenti, pesi)
@@ -499,8 +562,8 @@ if sezione == "💼 Portafoglio":
         st.plotly_chart(fig_b, width="stretch")
         st.dataframe(cm.formatta_metriche(mtr.metriche_asset(df_bench, risk_free)), width="stretch")
         st.caption(
-            "Riferimenti: **100% MSCI World** (tutte le azioni mondiali) e **60/40** "
-            "(60% azioni, 40% obbligazioni). Allineati sul periodo comune."
+            "Riferimenti con ETF in euro: **100% MSCI World** (SWDA, azioni dei paesi sviluppati) e "
+            "**60/40** (60% SWDA, 40% obbligazioni euro aggregate IEAG). Allineati sul periodo comune."
         )
     else:
         st.caption("Benchmark non disponibili per questo periodo.")
@@ -517,7 +580,9 @@ if sezione == "💼 Portafoglio":
         st.plotly_chart(fig_corr, width="stretch")
         st.caption(
             "Cosa significa per te: valori vicini a 1 = asset che si muovono insieme (poca "
-            "diversificazione); vicini a 0 o negativi = si muovono in modo diverso (più diversificazione)."
+            "diversificazione); vicini a 0 o negativi = si muovono in modo diverso (più diversificazione). "
+            "Calcolate su rendimenti **settimanali**: quelli giornalieri le sottostimano (borse con orari "
+            "e festività diversi)."
         )
         # Alert su asset molto sovrapposti.
         cols_c = list(corr_grezza.columns)
@@ -734,6 +799,7 @@ if sezione == "⏱️ Timing":
     if ris_max.prezzi.empty:
         st.warning("Storico non disponibile per il calcolo.")
     else:
+        cm.caption_periodo_storico(ris_max.prezzi.index)
         rend_max = mtr.rendimenti_giornalieri(ris_max.prezzi)
         serie_pf_max = mtr.serie_rendimenti_portafoglio(rend_max, pesi)
         anni_storico = (ris_max.prezzi.index.max() - ris_max.prezzi.index.min()).days / 365.25
@@ -848,6 +914,7 @@ if sezione == "💶 PAC":
     if ris_pac.prezzi.empty:
         st.warning("Storico non disponibile per il calcolo.")
     else:
+        cm.caption_periodo_storico(ris_pac.prezzi.index)
         serie_pf_pac = mtr.serie_rendimenti_portafoglio(mtr.rendimenti_giornalieri(ris_pac.prezzi), pesi)
         res_pac = mtr.simula_pac(serie_pf_pac, importo_pac, freq_map[freq_label])
         if res_pac is None:
@@ -876,38 +943,69 @@ if sezione == "💶 PAC":
 if sezione == "🎯 Obiettivo":
     st.subheader("Proiezione a obiettivo")
     st.caption(
-        "Quanto dovresti versare ogni mese per raggiungere una certa cifra, usando rendimento e "
-        "volatilità **storici** del tuo portafoglio. Stima statistica con scenari, non una garanzia."
+        "Quanto dovresti versare ogni mese per raggiungere una certa cifra. La simulazione estrae a caso "
+        "i **mesi storici** del tuo portafoglio (compresi quelli di crollo) attorno a un **rendimento "
+        "atteso** che scegli tu. Stima statistica con scenari, non una garanzia."
     )
-    co1, co2, co3 = st.columns(3)
-    obiettivo_eur = co1.number_input(
-        "Obiettivo (€)", min_value=1000.0, value=100000.0, step=1000.0,
-        help="La cifra che vorresti raggiungere.",
-    )
-    prob_perc = co2.slider(
-        "Probabilità di riuscita", min_value=50, max_value=95, value=75, step=5, format="%d%%",
-        help="Quanto vuoi andare «sul sicuro». Più alta = versamento mensile più alto, ma più "
-             "probabilità di centrare l'obiettivo anche se i mercati vanno male.",
-    )
-    co3.metric("Orizzonte", f"{orizzonte} anni", help="Si imposta nella barra laterale.")
 
     with st.spinner("Simulo gli scenari..."):
         ris_obj = cm.carica_dati(tuple(tickers_ok), "max", None, None, ss.valuta_base, ss.converti)
     if ris_obj.prezzi.empty:
         st.warning("Storico non disponibile per il calcolo.")
     else:
+        cm.caption_periodo_storico(ris_obj.prezzi.index)
         serie_pf_obj = mtr.serie_rendimenti_portafoglio(mtr.rendimenti_giornalieri(ris_obj.prezzi), pesi)
-        mu = mtr.cagr(serie_pf_obj)
-        sigma = mtr.volatilita_annua(serie_pf_obj)
+        mu_storico = mtr.cagr(serie_pf_obj)
+        rend_mensili = (1.0 + serie_pf_obj).resample("ME").prod() - 1.0
+
+        co1, co2, co3 = st.columns(3)
+        obiettivo_eur = co1.number_input(
+            "Obiettivo (€)", min_value=1000.0, value=100000.0, step=1000.0,
+            help="La cifra che vorresti raggiungere.",
+        )
+        prob_perc = co2.slider(
+            "Probabilità di riuscita", min_value=50, max_value=95, value=75, step=5, format="%d%%",
+            help="Quanto vuoi andare «sul sicuro». Più alta = versamento mensile più alto, ma più "
+                 "probabilità di centrare l'obiettivo anche se i mercati vanno male.",
+        )
+        co3.metric("Orizzonte", f"{orizzonte} anni", help="Si imposta nella barra laterale.")
+
+        ci1, ci2 = st.columns(2)
+        _mu_default = 5.0 if pd.isna(mu_storico) else min(max(round(float(mu_storico) * 100, 1), -5.0), 20.0)
+        rend_atteso = ci1.number_input(
+            "Rendimento atteso annuo (%)", min_value=-5.0, max_value=20.0, value=_mu_default,
+            step=0.5, format="%.1f",
+            help="Di default è il rendimento **storico** del portafoglio nel periodo indicato sopra (già "
+                 "al netto del TER). Il futuro può essere diverso: se lo storico viene da anni molto "
+                 "buoni, prova valori più bassi per una stima prudente.",
+        ) / 100.0
+        con_tasse = ci2.checkbox(
+            "Includi bollo (0,2%/anno) e tasse sul guadagno", value=True,
+            help="Valori **netti**: bollo ogni anno e, alla vendita, l'aliquota di ogni asset (vedi "
+                 "💰 Costi e tasse) sul guadagno.",
+        )
+        aliquota = sum(
+            float(pesi.get(t, 0.0)) * float(ss.costi.get(t, {}).get("aliquota", dsc.aliquota_default(t)))
+            for t in tickers_ok
+        ) / 100.0 if con_tasse else 0.0
+
         reali = bool(ss.get("reali"))
-        mu_use = ((1 + mu) / (1 + ss.get("inflazione", 0.0)) - 1) if reali else mu
+        mu_use = ((1 + rend_atteso) / (1 + ss.get("inflazione", 0.0)) - 1) if reali else rend_atteso
         nota_infl = (f" → **reale {cm.fmt_pct(mu_use, 1)}/anno** (tolta inflazione {cm.fmt_pct(ss.get('inflazione', 0.0), 1)})") if reali else ""
-        st.caption(f"Ipotesi dal tuo portafoglio: rendimento storico **{cm.fmt_pct(mu, 1)}/anno**, volatilità **{cm.fmt_pct(sigma, 1)}**{nota_infl}.")
+        nota_tasse = f"; bollo 0,2%/anno e tasse {cm.fmt_pct(aliquota, 1)} sul guadagno" if con_tasse else ""
+        st.caption(
+            f"Ipotesi: rendimento atteso **{cm.fmt_pct(rend_atteso, 1)}/anno**{nota_infl} (storico del "
+            f"portafoglio: {cm.fmt_pct(mu_storico, 1)}); oscillazioni dai **{len(rend_mensili)} mesi** "
+            f"storici{nota_tasse}."
+        )
         if reali:
             st.info("📉 Importi mostrati in **€ di oggi** (al netto dell'inflazione): è il potere d'acquisto reale.")
-        proj = mtr.proiezione_obiettivo(mu_use, sigma, obiettivo_eur, orizzonte, prob_perc / 100.0)
+        proj = mtr.proiezione_obiettivo(
+            rend_mensili, mu_use, obiettivo_eur, orizzonte, prob_perc / 100.0,
+            costo_annuo=0.002 if con_tasse else 0.0, aliquota=aliquota,
+        )
         if proj is None:
-            st.warning("Parametri non validi.")
+            st.warning("Servono almeno 12 mesi di storico comune per la simulazione.")
         else:
             val = ss.valuta_base if ss.converti else ""
             mc1, mc2 = st.columns(2)
@@ -932,23 +1030,25 @@ if sezione == "🎯 Obiettivo":
             st.plotly_chart(fig_obj, width="stretch")
             st.caption(
                 "Cosa significa per te: la banda mostra dove potrebbe arrivare il capitale nei vari scenari "
-                "(da pessimista a ottimista); la linea verde è l'obiettivo. Conta la **tendenza**, non il "
-                "singolo numero."
+                "(da pessimista a ottimista)" + (", **al netto** di bollo e tasse se vendessi in quel momento"
+                                                  if con_tasse else "")
+                + "; la linea verde è l'obiettivo. Conta la **tendenza**, non il singolo numero."
             )
-            st.caption("⚠️ Simulazione statistica (Monte Carlo) su ipotesi storiche: il futuro può essere diverso.")
+            st.caption("⚠️ Simulazione statistica (Monte Carlo bootstrap) su dati storici: il futuro può essere diverso.")
 
 # === Costi (TER) e fiscalità ==============================================
 if sezione == "💰 Costi e tasse":
     st.subheader("Costi (TER) e fiscalità — stime didattiche")
     st.caption(
         "TER (costo annuo) e **aliquota** fiscale **per singolo asset**. L'aliquota è impostata in "
-        "**automatico** (12,5% per gli ETF di **titoli di Stato** riconosciuti, 26% per il resto) e "
-        "puoi modificarla. In Italia c'è anche il **bollo 0,2%/anno**."
+        "**automatico**: 26%, ridotta **in proporzione** alla quota in **titoli di Stato** (tassata al "
+        "12,5%) — es. 12,5% per un ETF di soli titoli di Stato, ~18,6% per un obbligazionario globale. "
+        "Puoi modificarla. In Italia c'è anche il **bollo 0,2%/anno**."
     )
     righe_costi = []
     for t in tickers_ok:
         c = ss.costi.get(t, {})
-        aliq_default = 12.5 if dsc.is_titolo_stato(t) else 26.0
+        aliq_default = dsc.aliquota_default(t)
         righe_costi.append({"Ticker": t, "Asset": nomi.get(t, t),
                             "TER %": float(c.get("ter", 0.20)),
                             "Aliquota %": float(c.get("aliquota", aliq_default))})
@@ -962,7 +1062,8 @@ if sezione == "💰 Costi e tasse":
                 help="Costo annuo dell'ETF, lo trovi nel KID (es. 0,20%)."),
             "Aliquota %": st.column_config.NumberColumn(
                 "Aliquota %", min_value=0.0, max_value=43.0, step=0.5,
-                help="26% azioni e obbligazioni societarie; 12,5% titoli di Stato/white-list."),
+                help="26% su azioni e obbligazioni societarie; 12,5% sulla quota in titoli di "
+                     "Stato/white-list. Per un ETF misto: 26% − 13,5% × quota in titoli di Stato."),
         },
     )
     ter_pesato, aliq_pesata = 0.0, 0.0
@@ -978,10 +1079,16 @@ if sezione == "💰 Costi e tasse":
         "Capitale di esempio (€)", min_value=100.0, value=10000.0, step=100.0,
         help="Su quale capitale calcolare l'impatto di costi e tasse nel tempo.")
     serie_pf_c = mtr.serie_rendimenti_portafoglio(rendimenti, pesi)
-    rendimento_lordo = mtr.cagr(serie_pf_c)
-    if pd.isna(rendimento_lordo):
-        rendimento_lordo = 0.05
-    st.caption(f"Ipotesi di rendimento lordo: **{cm.fmt_pct(rendimento_lordo, 1)}/anno** (storico del portafoglio).")
+    rendimento_storico = mtr.cagr(serie_pf_c)
+    if pd.isna(rendimento_storico):
+        rendimento_storico = 0.05
+    # I prezzi degli ETF sono GIÀ al netto del TER: il lordo (senza costi) è storico + TER.
+    rendimento_lordo = rendimento_storico + ter_pesato
+    st.caption(
+        f"Ipotesi di rendimento lordo: **{cm.fmt_pct(rendimento_lordo, 1)}/anno** = storico del "
+        f"portafoglio {cm.fmt_pct(rendimento_storico, 1)} (già al netto del TER, incluso nei prezzi "
+        f"degli ETF) + TER {cm.fmt_pct(ter_pesato)}."
+    )
 
     orizzonti = sorted({10, 20, int(orizzonte)})
     cols_anni = st.columns(len(orizzonti))
@@ -1051,7 +1158,7 @@ if sezione == "💸 Dividendi":
             y = cm.rendimento_dividendo(t)
             w = float(pesi.get(t, 0.0))
             aliq = float(ss.costi.get(t, {}).get(
-                "aliquota", 12.5 if dsc.is_titolo_stato(t) else 26.0)) / 100.0
+                "aliquota", dsc.aliquota_default(t))) / 100.0
             lordo = capitale_div * w * y
             netto = lordo * (1.0 - aliq)
             yield_pesato += w * y
@@ -1100,6 +1207,7 @@ if sezione == "♻️ Ribilanciamento":
     if ris_rib.prezzi.empty:
         st.warning("Storico non disponibile per il calcolo.")
     else:
+        cm.caption_periodo_storico(ris_rib.prezzi.index)
         modo = "annuale" if modo_label == "Annuale" else "soglia"
         res_rib = mtr.simula_ribilanciamento(ris_rib.prezzi, pesi, modo, soglia)
         serie_rib = res_rib["serie"]
@@ -1133,6 +1241,7 @@ if sezione == "📊 Statistica":
     if ris_stat.prezzi.empty:
         st.warning("Storico non disponibile per il calcolo.")
     else:
+        cm.caption_periodo_storico(ris_stat.prezzi.index)
         rend_stat = mtr.rendimenti_giornalieri(ris_stat.prezzi)
         serie_pf_stat = mtr.serie_rendimenti_portafoglio(rend_stat, pesi)
         ricchezza_pf = mtr.serie_cumulata(serie_pf_stat, base=100.0)
@@ -1264,12 +1373,14 @@ if sezione == "🧮 Ottimizzazione":
                     x=vol_asset.values, y=mu_asset.values, mode="markers+text",
                     text=[etichette_grafico[t] for t in rendimenti.columns], textposition="top center", name="Asset",
                 ))
+                # Stessa misura della curva e degli asset (media aritmetica annua), non il CAGR:
+                # altrimenti i portafogli finirebbero disegnati SOTTO la frontiera.
                 fig_f.add_trace(go.Scatter(
-                    x=[met_pf["Volatilità annua (covarianza)"]], y=[met_pf["Rend. annuo (CAGR)"]],
+                    x=[met_pf["Volatilità annua (covarianza)"]], y=[float((pesi * mu_asset).sum())],
                     mode="markers", marker=dict(size=13, symbol="diamond", color="gray"), name="Portafoglio attuale",
                 ))
                 fig_f.add_trace(go.Scatter(
-                    x=[met_opt["Volatilità annua (covarianza)"]], y=[met_opt["Rend. annuo (CAGR)"]],
+                    x=[met_opt["Volatilità annua (covarianza)"]], y=[float((w_opt * mu_asset).sum())],
                     mode="markers", marker=dict(size=16, symbol="star", color="green"),
                     name=f"Ottimale ({scelta.split('(')[0].strip()})",
                 ))
@@ -1351,9 +1462,10 @@ if sezione == "🆚 Confronto":
         met_conf = mtr.metriche_asset(df_rend, risk_free)
         st.dataframe(cm.formatta_metriche(met_conf), width="stretch")
         st.caption(
-            "I portafogli famosi sono ricostruiti con ETF rappresentativi (USA): possono differire "
-            "leggermente dalle versioni «originali». ⚠️ Analisi storica a scopo didattico, "
-            "non un consiglio di investimento."
+            "100% MSCI World e 60/40 usano ETF in euro (SWDA, IEAG); All Weather, Golden Butterfly e "
+            "Permanent Portfolio sono allocazioni americane ricostruite con ETF USA (in dollari, "
+            "convertiti se attivo): possono differire dalle versioni «originali». ⚠️ Analisi storica a "
+            "scopo didattico, non un consiglio di investimento."
         )
 
 # === Assistente guidato (senza AI esterna, nessuna chiave) =================

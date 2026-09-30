@@ -176,7 +176,7 @@ if df.empty:
 # ---------------------------------------------------------------------------
 
 rend = df["Close"].pct_change().dropna()
-risk_free = ss.risk_free
+risk_free = cm.risk_free_storico()  # serie Euribor storica (EUR) o valore manuale
 st.subheader(f"Statistiche · {nome_asset} · {intervallo}")
 m1, m2, m3, m4, m5, m6 = st.columns(6)
 m1.metric("Rend. cumulato", f"{cm.fmt_pct(mtr.rendimento_cumulato(rend))}")

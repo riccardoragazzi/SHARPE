@@ -62,11 +62,13 @@ SETTORI_IT = {
 DEFAULT_TICKERS = ["SWDA.MI", "EIMI.MI", "AGGH.MI"]
 DEFAULT_PESI = [50.0, 20.0, 30.0]
 
-# Portafogli "famosi" ricostruiti con ETF rappresentativi (USA, storia lunga).
-# I pesi sommano a 1. Usati per il confronto nella pagina Builder.
+# Portafogli "famosi" per il confronto nella pagina Builder (pesi che sommano a 1).
+# I due benchmark di riferimento usano ETF UCITS in EUR su Borsa Italiana (storia
+# dal 2009, stesso calendario degli ETF dell'utente, niente rischio cambio sulle
+# obbligazioni); gli altri sono allocazioni celebri americane, con ETF USA.
 PORTAFOGLI_FAMOSI = {
-    "100% MSCI World": {"URTH": 1.0},
-    "60/40 (azioni/obbligazioni)": {"VTI": 0.60, "AGG": 0.40},
+    "100% MSCI World": {"SWDA.MI": 1.0},
+    "60/40 (azioni/obbligazioni)": {"SWDA.MI": 0.60, "IEAG.MI": 0.40},
     "All Weather (Ray Dalio)": {"VTI": 0.30, "TLT": 0.40, "IEI": 0.15, "GLD": 0.075, "DBC": 0.075},
     "Golden Butterfly": {"VTI": 0.20, "IWN": 0.20, "TLT": 0.20, "SHY": 0.20, "GLD": 0.20},
     "Permanent Portfolio": {"VTI": 0.25, "TLT": 0.25, "SHY": 0.25, "GLD": 0.25},
@@ -95,7 +97,9 @@ PRESET_IN_EVIDENZA = [
 # Funzioni con cache (evitano chiamate di rete ripetute ad ogni interazione)
 # ---------------------------------------------------------------------------
 
-@st.cache_data(show_spinner=False)
+# ttl: senza scadenza i prezzi resterebbero fermi finché l'app non si riavvia
+# (con un ping che la tiene sveglia, potenzialmente per settimane).
+@st.cache_data(ttl="6h", show_spinner=False)
 def carica_dati(tickers, period, start, end, valuta_base, converti):
     """Scarica i prezzi (close aggiustati) e, se richiesto, li converte in EUR."""
     ris = dati.scarica_prezzi(list(tickers), period=period, start=start, end=end)
@@ -147,16 +151,60 @@ def isin_di(ticker):
     return iz if iz else dati.isin_strumento(ticker)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(ttl="1d", show_spinner=False)
 def rendimento_dividendo(ticker):
     """Rendimento da dividendo annuo stimato (con cache)."""
     return dati.rendimento_dividendo(ticker)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(ttl="6h", show_spinner=False)
 def ohlcv(ticker, period="max"):
     """Dati OHLCV di un singolo asset per l'analisi tecnica (con cache)."""
     return dati.scarica_ohlcv(ticker, period=period)
+
+
+@st.cache_data(ttl="1d", show_spinner=False)
+def serie_eurostat(query):
+    """Serie macro mensile da Eurostat (risk-free, inflazione), con cache giornaliera."""
+    return dati.scarica_serie_eurostat(query)
+
+
+def _usa_storici() -> bool:
+    """Dati storici reali solo se attivati e in EUR (Euribor e HICP sono dell'area euro)."""
+    return bool(ss.get("storici", True)) and ss.get("valuta_base") == "EUR"
+
+
+def risk_free_storico():
+    """Risk-free per le metriche sul passato: serie Euribor 3M (frazione annua) o valore manuale."""
+    if _usa_storici():
+        s = serie_eurostat(dati.SERIE_RISK_FREE)
+        if not s.empty:
+            return s / 100.0
+    return ss.risk_free
+
+
+def inflazione_periodo(inizio, fine) -> tuple[float, bool]:
+    """Inflazione annua media del periodo: ``(valore, True)`` se HICP effettivo, altrimenti manuale."""
+    if _usa_storici():
+        v = mtr.inflazione_annua_media(serie_eurostat(dati.SERIE_INFLAZIONE), inizio, fine)
+        if not np.isnan(v):
+            return v, True
+    return ss.inflazione, False
+
+
+def caption_rendimento_reale(cagr, indice) -> str | None:
+    """Testo del rendimento reale (al netto dell'inflazione) sul periodo ``indice``."""
+    if pd.isna(cagr) or len(indice) == 0:
+        return None
+    infl, effettiva = inflazione_periodo(indice.min(), indice.max())
+    if not effettiva and infl <= 0:
+        return None
+    reale = (1 + cagr) / (1 + infl) - 1
+    fonte = ("dell'inflazione **effettiva** del periodo" if effettiva
+             else "di un'inflazione **ipotizzata**")
+    nota = ", HICP area euro, Eurostat" if effettiva else ""
+    return (f"Al netto {fonte} ({fmt_pct(infl, 1)}/anno{nota}), il rendimento **reale** "
+            f"(potere d'acquisto) è **{fmt_pct(reale)}/anno**.")
 
 
 def rendimenti_portafoglio_famoso(nome, period, start, end, valuta_base, converti):
@@ -517,17 +565,19 @@ def sidebar_parametri():
     modo = st.sidebar.radio("Modalità", ["Periodo rapido", "Intervallo personalizzato"], key="modo_periodo")
     period, data_inizio, data_fine = None, None, None
     if modo == "Periodo rapido":
-        period = st.sidebar.selectbox("Periodo", ["1y", "2y", "3y", "5y", "10y", "max"], index=3, key="sel_period")
+        # Default 10 anni: su 5 anni le metriche sono dominate da un solo evento (es. il 2022).
+        period = st.sidebar.selectbox("Periodo", ["1y", "2y", "3y", "5y", "10y", "max"], index=4, key="sel_period")
     else:
         oggi = pd.Timestamp.today().normalize()
-        data_inizio = st.sidebar.date_input("Data inizio", oggi - pd.Timedelta(days=5 * 365), key="d_inizio")
+        data_inizio = st.sidebar.date_input("Data inizio", oggi - pd.Timedelta(days=10 * 365), key="d_inizio")
         data_fine = st.sidebar.date_input("Data fine", oggi, key="d_fine")
 
     st.sidebar.subheader("Altri parametri")
     rf_perc = st.sidebar.number_input(
         "Tasso risk-free annuo (%)", value=3.0, step=0.25, format="%.2f", key="rf",
         help="Rendimento di un investimento «senza rischio» (es. titoli di Stato a breve). "
-             "Serve per calcolare Sharpe e Sortino.",
+             "Serve per Sharpe e Sortino quando i «dati storici reali» qui sotto sono disattivati "
+             "(o la valuta base non è EUR).",
     )
     orizzonte = st.sidebar.number_input(
         "Orizzonte d'investimento (anni)", value=10, min_value=1, max_value=40, step=1, key="orizzonte",
@@ -537,12 +587,21 @@ def sidebar_parametri():
     infl_perc = st.sidebar.number_input(
         "Inflazione annua attesa (%)", value=2.0, min_value=0.0, max_value=15.0, step=0.5, format="%.1f",
         key="infl_perc",
-        help="Quanto crescono i prezzi ogni anno. Serve per i «valori reali» (potere d'acquisto).",
+        help="Quanto crescono i prezzi ogni anno. Serve per le **proiezioni** in valori reali "
+             "(potere d'acquisto); per il passato si usa l'inflazione effettiva se i «dati storici "
+             "reali» sono attivi.",
     )
     reali = st.sidebar.checkbox(
         "Ragiona al netto dell'inflazione (valori reali)", value=False, key="reali",
         help="Se attivo, rendimenti e proiezioni sono espressi in **€ di oggi** (tolta l'inflazione): "
              "più realistico su 10–20 anni.",
+    )
+    st.sidebar.checkbox(
+        "📜 Usa dati storici reali (area euro) per il passato", value=True, key="storici",
+        help="Per le metriche sul periodo **passato** usa i valori **effettivi** da Eurostat: "
+             "Euribor 3 mesi come risk-free (Sharpe, Sortino) e inflazione HICP per il rendimento "
+             "reale. Risk-free e inflazione qui sopra restano per le **proiezioni** e si usano "
+             "anche se la valuta base non è EUR o i dati non sono disponibili.",
     )
     valuta_base = st.sidebar.selectbox("Valuta base", VALUTE_COMUNI, index=0, key="valuta")
     converti = st.sidebar.checkbox(f"Converti tutto in {valuta_base}", value=True, key="conv")
@@ -713,12 +772,17 @@ def mostra_glossario():
             "- **Volatilità annua** — quanto oscilla il valore: più bassa = più tranquillo. "
             "Indicativo: sotto 8% basso, 8–15% medio, oltre 15% alto.\n"
             "- **Sharpe** — rendimento ottenuto per ogni unità di rischio (oltre il risk-free). "
-            "Indicativo: **>1 buono, >2 ottimo, <0** il rischio non è stato ripagato.\n"
+            "Non ha una soglia assoluta: **confrontalo** con un benchmark nello **stesso periodo** "
+            "(es. 100% MSCI World o 60/40, nel 📋 Report). Su periodi lunghi un portafoglio "
+            "diversificato sta spesso tra **0,3 e 0,6**; **<0** = il rischio non è stato ripagato.\n"
             "- **Sortino** — come lo Sharpe, ma considera solo le oscillazioni **verso il basso** "
             "(le perdite). Più alto è meglio.\n"
             "- **Max drawdown** — la perdita massima dal punto più alto a quello più basso "
             "(es. −30% = a un certo punto avresti perso il 30% dal picco). Più vicino a 0 è meglio.\n"
-            "- **Rendimento cumulato** — quanto hai guadagnato in **totale** nel periodo.\n\n"
+            "- **Rendimento cumulato** — quanto hai guadagnato in **totale** nel periodo.\n"
+            "- **Pesi costanti** — le metriche del portafoglio assumono che i pesi restino sempre "
+            "quelli scelti (ribilanciamento continuo, ipotesi standard). Per «compra e tieni» o "
+            "ribilanciamento annuale vedi ♻️ *Ribilanciamento* (modalità Avanzato).\n\n"
             "_Valori indicativi e didattici: dipendono dal periodo analizzato e non sono garanzie._"
         )
 
@@ -736,6 +800,18 @@ def mostra_box_rischio_cambio():
             "_Qui i prezzi vengono convertiti nella tua valuta base solo per confrontarli; la copertura "
             "valutaria dipende dal singolo ETF (vedi nome/factsheet, es. «EUR Hedged»)._"
         )
+
+
+def caption_periodo_storico(indice):
+    """Didascalia col periodo effettivo delle sezioni che usano TUTTO lo storico comune."""
+    if len(indice) == 0:
+        return
+    anni = (indice.max() - indice.min()).days / 365.25
+    st.caption(
+        f"📅 Periodo usato qui: **{indice.min():%d/%m/%Y} → {indice.max():%d/%m/%Y}** "
+        f"(~{fmt_num(anni, 1)} anni) — **tutto lo storico comune** degli asset, non l'intervallo "
+        "della barra laterale."
+    )
 
 
 def mostra_footer_disclaimer():
@@ -831,7 +907,9 @@ def risposta_assistente(domanda: str, dati: dict) -> str:
     if "sharpe" in d:
         return (
             "**Sharpe** = rendimento ottenuto per ogni unità di rischio (oltre il risk-free). "
-            "Indicativo: >1 buono, >2 ottimo, <0 il rischio non è stato ripagato. "
+            "Non ha una soglia assoluta: va **confrontato** con un benchmark nello stesso periodo "
+            "(nel 📋 Report trovi 100% MSCI World e 60/40). Su periodi lunghi un portafoglio "
+            "diversificato sta spesso tra 0,3 e 0,6; <0 = il rischio non è stato ripagato. "
             f"Il tuo è **{_num('Sharpe', '{:.2f}')}**."
         )
     if "sortino" in d:
@@ -936,13 +1014,12 @@ def _figura_gauge(valore: float, chiave: str):
 
 
 def mostra_semaforo_mercato():
-    """Indicatore GENERALE di mercato (risk-on / risk-off), 1–5.
+    """Indicatore GENERALE di mercato (risk-on / risk-off), 1–5 — solo in modalità Avanzato.
 
-    Risponde a: «conviene statisticamente investire ora su asset più rischiosi
-    (azioni) o più prudenti (obbligazioni/liquidità)?». È **indipendente dal
-    portafoglio**: si calcola su un benchmark azionario globale (vedi
-    ``BENCHMARK_MERCATO``). Mostra una barra colorata sempre visibile e un
-    pannello con il gauge e i dettagli.
+    **Descrive** il clima attuale dell'azionario globale (trend, volatilità,
+    momentum su ``BENCHMARK_MERCATO``), indipendente dal portafoglio. Non dice
+    cosa fare: il pannello include un backtest che mostra cosa sarebbe successo
+    usandolo per entrare/uscire, cioè la lezione anti-market-timing.
     """
     close, usato = None, None
     for b in BENCHMARK_MERCATO:
@@ -964,12 +1041,11 @@ def mostra_semaforo_mercato():
         f"&nbsp;<b>{sem['banda']}/5</b> — {sem['etichetta']}</div>",
         unsafe_allow_html=True,
     )
-    with st.expander("ℹ️ Meglio investire ora su asset più rischiosi o più prudenti? (indicatore generale di mercato)"):
+    with st.expander("ℹ️ Cosa misura questo indicatore — e avrebbe aiutato a entrare/uscire?"):
         st.caption(
-            "Indicatore **generale e indipendente dal tuo portafoglio**: stima, su base statistica, "
-            "se il contesto di mercato è favorevole agli asset rischiosi (azioni) o a quelli prudenti "
-            "(obbligazioni/liquidità), con orizzonte orientativo di **circa 1 anno**. "
-            f"Calcolato sull'azionario globale (benchmark: {usato})."
+            "Indicatore **generale e indipendente dal tuo portafoglio**: **descrive** il clima attuale "
+            "dell'azionario globale — se è in tendenza positiva e tranquillo (risk-on) o in calo e "
+            f"agitato (risk-off). Benchmark: {usato}."
         )
         cg, ci = st.columns([1, 1])
         with cg:
@@ -988,15 +1064,34 @@ def mostra_semaforo_mercato():
                 f"Momentum: {_segno(sem['momentum'])}"
             )
         st.caption(
-            "Lettura: **5 = meglio asset rischiosi** (azioni) · 3 = neutro · **1 = meglio asset prudenti**. "
+            "Lettura: **5 = mercati in crescita e calmi** · 3 = neutro · **1 = mercati in calo e agitati**. "
             "Basato su trend (vs media 200gg), regime di volatilità e momentum a 6 mesi. "
-            "⚠️ Indicazione statistica/storica a scopo **didattico**, non un consiglio di investimento; "
-            "i mercati possono comportarsi diversamente."
+            "⚠️ Descrizione statistica a scopo **didattico**, non un consiglio di investimento."
         )
-        st.caption(
-            "📌 Per un investitore di **lungo periodo** conta soprattutto **restare investiti**: questo "
-            "indicatore è educativo, non un segnale per fare *market timing* (entrare/uscire al momento giusto)."
-        )
+
+        # Backtest: e se lo avessi usato per uscire quando è rosso?
+        bt = mtr.backtest_semaforo(close)
+        if bt.get("valido"):
+            st.markdown("**E se lo avessi usato per uscire dal mercato quando è rosso (1–2)?**")
+            b1, b2, b3 = st.columns(3)
+            b1.metric("Rend. annuo", fmt_pct(bt["cagr_strat"]),
+                      f"{(bt['cagr_strat'] - bt['cagr_bh']) * 100:+.1f} pt vs sempre investito".replace(".", ","),
+                      help=f"Sempre investito: {fmt_pct(bt['cagr_bh'])}/anno.")
+            b2.metric("Calo massimo", fmt_pct(bt["dd_strat"], 1),
+                      help=f"Sempre investito: {fmt_pct(bt['dd_bh'], 1)}.")
+            b3.metric("Entrate/uscite", f"{bt['cambi']}",
+                      help=f"Tempo investito: {fmt_pct(bt['quota_investito'], 0)} dei giorni.")
+            fig_bt = px.line(bt["serie"], labels={"value": "Indice (base 100)", "index": "Data", "variable": ""})
+            fig_bt.update_layout(hovermode="x unified", legend_title_text="", margin=dict(t=20), height=300)
+            st.plotly_chart(fig_bt, width="stretch", key="backtest_semaforo")
+            st.caption(
+                f"Backtest su {usato} ({bt['serie'].index.min():%m/%Y} → {bt['serie'].index.max():%m/%Y}), "
+                "decidendo ogni sera col semaforo di quel giorno; fuori dal mercato = liquidità allo 0%. "
+                "**Non** include commissioni né tasse: in Italia ogni uscita in guadagno paga il 26%, quindi "
+                "nella realtà la strategia andrebbe **peggio** di così. Ridurre i cali spesso costa rendimento, "
+                "perché si perdono i rimbalzi: per un investitore di lungo periodo conta soprattutto "
+                "**restare investiti**."
+            )
 
 
 def mostra_lettura_statistica(prezzo: pd.Series, rendimenti: pd.Series, risk_free: float, chiave: str = ""):

@@ -179,18 +179,21 @@ TICKER_TO_ISIN: dict[str, str] = {
     "IMEU.MI": "IE00B4K48X80",
 }
 
-# Composizioni canoniche che sono "titoli di Stato" (aliquota fiscale 12,5%).
-_GOVT_CANONICI = {"EUR_GOVT_BOND", "US_TREASURY"}
-
-
 def isin_di(ticker: str) -> str:
     """ISIN noto per un ticker (dal dataset interno), altrimenti stringa vuota."""
     return TICKER_TO_ISIN.get(str(ticker).strip().upper(), "")
 
 
-def is_titolo_stato(ticker: str) -> bool:
-    """True se il ticker è un ETF di **titoli di Stato** (aliquota 12,5%)."""
-    return TICKER_MAP.get(str(ticker).strip().upper()) in _GOVT_CANONICI
+def aliquota_default(ticker: str) -> float:
+    """Aliquota fiscale % stimata per un ETF: 26%, ridotta **pro-quota** per i titoli di Stato.
+
+    La quota in titoli di Stato/white list è tassata al 12,5% (base imponibile al
+    48,08%), quindi: aliquota = 26 − 13,5 × quota. Es. ETF di soli titoli di Stato
+    → 12,5%; obbligazionario globale (~55% governativi) → ~18,6%; azionario → 26%.
+    La quota viene dal dataset interno (stima indicativa); l'utente può modificarla.
+    """
+    quota = composizione_nota(ticker).get("settore", {}).get("Titoli di Stato", 0.0)
+    return round(26.0 - 13.5 * quota, 1)
 
 
 def _percentuali_a_frazioni(d: dict[str, float]) -> dict[str, float]:

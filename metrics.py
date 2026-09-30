@@ -7,6 +7,10 @@ Convenzioni adottate in tutto il modulo:
 - si lavora sui **rendimenti giornalieri semplici** (variazione percentuale);
 - si annualizza con **252** giorni di borsa;
 - il rendimento annualizzato è il **CAGR geometrico** (non la media aritmetica);
+- Sharpe e Sortino usano invece la **media aritmetica** dei rendimenti in eccesso
+  (definizione standard, coerente con ottimizzatore e frontiera efficiente);
+- il risk-free è un tasso annuo costante **oppure** una serie storica di tassi
+  annui (es. Euribor 3 mesi), allineata giorno per giorno ai rendimenti;
 - per la volatilità si usa la deviazione standard campionaria (``ddof=1``);
 - i pesi del portafoglio vengono sempre normalizzati a somma 1.
 
@@ -102,23 +106,45 @@ def downside_deviation_annua(rendimenti: pd.Series, mar_annuo: float = 0.0) -> f
     return float(dd_giornaliera * np.sqrt(GIORNI_BORSA))
 
 
-def sharpe(rendimenti: pd.Series, risk_free: float = 0.0) -> float:
-    """Indice di Sharpe = (CAGR − risk_free) / volatilità annua."""
-    vol = volatilita_annua(rendimenti)
-    if vol is None or np.isnan(vol) or vol == 0:
-        return np.nan
-    return (cagr(rendimenti) - risk_free) / vol
+def rf_giornaliero(risk_free, indice: pd.DatetimeIndex):
+    """Risk-free giornaliero: da tasso annuo costante (float) o da serie storica annua.
 
-
-def sortino(rendimenti: pd.Series, risk_free: float = 0.0) -> float:
-    """Indice di Sortino = (CAGR − risk_free) / downside deviation annua.
-
-    Il MAR usato per la downside deviation è il risk-free stesso.
+    La serie (es. Euribor mensile) viene riallineata alle date ``indice``
+    prendendo l'ultimo valore disponibile; le date precedenti al primo dato usano
+    il primo valore.
     """
-    dd = downside_deviation_annua(rendimenti, mar_annuo=risk_free)
-    if dd is None or np.isnan(dd) or dd == 0:
+    if isinstance(risk_free, pd.Series):
+        rf = risk_free.sort_index().reindex(indice, method="ffill").bfill()
+        return rf / GIORNI_BORSA
+    return risk_free / GIORNI_BORSA
+
+
+def sharpe(rendimenti: pd.Series, risk_free=0.0) -> float:
+    """Indice di Sharpe = rendimento medio annuo in eccesso sul risk-free / volatilità annua.
+
+    Media **aritmetica** (definizione standard): è la stessa grandezza che
+    massimizza l'ottimizzatore «massimo Sharpe». ``risk_free``: tasso annuo o
+    serie storica di tassi annui.
+    """
+    r = rendimenti.dropna()
+    vol = volatilita_annua(r)
+    if np.isnan(vol) or vol == 0:
         return np.nan
-    return (cagr(rendimenti) - risk_free) / dd
+    eccesso = r - rf_giornaliero(risk_free, r.index)
+    return float(eccesso.mean() * GIORNI_BORSA / vol)
+
+
+def sortino(rendimenti: pd.Series, risk_free=0.0) -> float:
+    """Indice di Sortino = rendimento medio annuo in eccesso / downside deviation annua.
+
+    Il MAR della downside deviation è il risk-free stesso (qui: eccesso sotto 0).
+    """
+    r = rendimenti.dropna()
+    eccesso = r - rf_giornaliero(risk_free, r.index)
+    dd = downside_deviation_annua(eccesso)
+    if np.isnan(dd) or dd == 0:
+        return np.nan
+    return float(eccesso.mean() * GIORNI_BORSA / dd)
 
 
 def serie_drawdown(rendimenti: pd.Series) -> pd.Series:
@@ -211,6 +237,22 @@ def rendimento_cumulato(rendimenti: pd.Series) -> float:
     return float((1.0 + rendimenti).prod() - 1.0)
 
 
+def inflazione_annua_media(indice_prezzi: pd.Series, inizio, fine) -> float:
+    """Inflazione media annua (composta) tra due date, da un indice dei prezzi mensile.
+
+    Usa l'ultimo valore disponibile a ciascuna data (l'HICP esce con ~1 mese di
+    ritardo). Restituisce ``nan`` se l'indice non copre il periodo.
+    """
+    s = indice_prezzi.dropna().sort_index()
+    s0, s1 = s[:inizio], s[:fine]
+    if s0.empty or s1.empty:
+        return np.nan
+    giorni = (s1.index[-1] - s0.index[-1]).days
+    if giorni < 28:
+        return np.nan
+    return float((s1.iloc[-1] / s0.iloc[-1]) ** (365.25 / giorni) - 1.0)
+
+
 def serie_cumulata(rendimenti: pd.DataFrame | pd.Series, base: float = 100.0):
     """Indice della ricchezza normalizzato a ``base`` (default 100)."""
     return base * (1.0 + rendimenti).cumprod()
@@ -265,8 +307,14 @@ def volatilita_portafoglio_cov(rendimenti: pd.DataFrame, pesi: pd.Series) -> flo
 
 
 def matrice_correlazione(rendimenti: pd.DataFrame) -> pd.DataFrame:
-    """Matrice di correlazione dei rendimenti tra gli asset."""
-    return rendimenti.corr()
+    """Matrice di correlazione tra gli asset, su rendimenti **settimanali**.
+
+    I rendimenti giornalieri sottostimano le correlazioni: borse con orari di
+    chiusura diversi e festività riempite col prezzo precedente «sfasano» i
+    movimenti di un giorno. Su base settimanale lo sfasamento si riassorbe.
+    """
+    settimanali = (1.0 + rendimenti).resample("W-FRI").prod(min_count=1) - 1.0
+    return settimanali.corr()
 
 
 def contributo_rischio(rendimenti: pd.DataFrame, pesi: pd.Series) -> pd.DataFrame:
@@ -431,25 +479,35 @@ def simula_pac(serie_rendimenti: pd.Series, importo: float = 100.0, frequenza_me
 
 
 def proiezione_obiettivo(
-    mu_annuo: float, sigma_annuo: float, obiettivo: float, anni: int,
-    prob_target: float = 0.75, n_sim: int = 2000, seed: int = 0,
+    rend_mensili: pd.Series, rend_atteso: float, obiettivo: float, anni: int,
+    prob_target: float = 0.75, costo_annuo: float = 0.0, aliquota: float = 0.0,
+    n_sim: int = 2000, seed: int = 0,
 ) -> dict | None:
     """Proiezione FUTURA: versamento mensile per un obiettivo, a probabilità scelta.
 
-    Con una **simulazione Monte Carlo** (rendimenti mensili ~Normale) calcola il
-    versamento mensile necessario perché il portafoglio raggiunga ``obiettivo``
-    euro tra ``anni`` anni **con probabilità ≈ ``prob_target``** (es. 75%), non
-    solo "in media". Sfrutta la linearità: il valore finale è proporzionale al
-    versamento, quindi PMT = obiettivo / (percentile (1−q) del valore accumulato
-    da 1 €/mese). Restituisce PMT, probabilità effettiva, scenari e bande nel tempo.
+    Simulazione Monte Carlo **bootstrap**: ogni mese simulato è estratto a caso
+    dai rendimenti mensili **storici** del portafoglio (``rend_mensili``), così
+    restano i mesi di crollo e le «code grasse» che una distribuzione normale
+    ignora. I mesi vengono ricentrati sul rendimento annuo atteso ``rend_atteso``
+    (CAGR, già al netto del TER come i prezzi degli ETF) meno ``costo_annuo``
+    (es. bollo 0,2%). I valori sono **netti**: se vendi, paghi ``aliquota`` sul
+    guadagno (valore − versato).
+
+    Calcola il versamento mensile PMT per raggiungere ``obiettivo`` tra ``anni``
+    anni **con probabilità ≈ ``prob_target``**. Il valore netto è proporzionale al
+    versamento, quindi PMT = obiettivo / (percentile (1−q) del valore netto
+    accumulato da 1 €/mese). Restituisce PMT, probabilità effettiva, scenari e
+    bande nel tempo. ``None`` se orizzonte nullo o storico sotto i 12 mesi.
     """
+    storici = pd.Series(rend_mensili, dtype="float64").dropna().values
     n = int(anni * 12)
-    if n <= 0:
+    if n <= 0 or len(storici) < 12:
         return None
-    r_m = (1.0 + mu_annuo) ** (1.0 / 12.0) - 1.0
-    sig_m = sigma_annuo / np.sqrt(12.0)
+    log_r = np.log1p(storici)
+    log_r = log_r - log_r.mean() + np.log1p(max(rend_atteso - costo_annuo, -0.99)) / 12.0
     rng = np.random.default_rng(seed)
-    rendimenti = rng.normal(r_m, sig_m, size=(n_sim, n))
+    # ponytail: mesi estratti indipendenti; usare blocchi di mesi se serve la sequenza (momentum/crisi lunghe).
+    rendimenti = np.expm1(rng.choice(log_r, size=(n_sim, n), replace=True))
 
     # Valore accumulato versando 1 €/mese (per ogni simulazione e nel tempo).
     storia = np.empty((n_sim, n))
@@ -457,6 +515,9 @@ def proiezione_obiettivo(
     for t in range(n):
         g = (g + 1.0) * (1.0 + rendimenti[:, t])
         storia[:, t] = g
+    # Netto se vendessi in quel mese: tasse solo sul guadagno.
+    versato = np.arange(1, n + 1)
+    storia = storia - aliquota * np.clip(storia - versato, 0.0, None)
     g_finale = storia[:, -1]
 
     q = min(max(float(prob_target), 0.50), 0.95)
@@ -948,6 +1009,8 @@ def pesi_massimo_sharpe(
     sigma = matrice_covarianza_annua(rendimenti).values
     mu = rendimenti.mean().values * GIORNI_BORSA
     lo, hi = _limiti_peso(frazione_minima, n, long_only, peso_max)
+    # Risk-free medio annuo del periodo: così il massimo coincide con lo Sharpe mostrato.
+    risk_free = float(np.mean(rf_giornaliero(risk_free, rendimenti.index))) * GIORNI_BORSA
 
     if long_only and n * lo >= 1.0 - 1e-9:
         return pd.Series(1.0 / n, index=colonne)
@@ -1193,12 +1256,13 @@ def vantaggio_statistico(rendimenti: pd.Series, risk_free: float = 0.0) -> dict:
 
 # Colori ed etichette delle 5 fasce del semaforo del rischio.
 SEMAFORO_COLORI = {1: "#b3261e", 2: "#e8705f", 3: "#bdbdbd", 4: "#7fc97f", 5: "#2e7d32"}
+# Etichette DESCRITTIVE del clima attuale (non indicazioni su cosa fare).
 SEMAFORO_ETICHETTE = {
-    1: "Molto sfavorevole al rischio",
-    2: "Sfavorevole al rischio",
+    1: "Risk-off marcato (mercati in calo e agitati)",
+    2: "Risk-off",
     3: "Neutro",
-    4: "Favorevole al rischio",
-    5: "Molto favorevole al rischio",
+    4: "Risk-on",
+    5: "Risk-on marcato (mercati in crescita e calmi)",
 }
 
 
@@ -1256,3 +1320,45 @@ def semaforo_rischio(prezzo: pd.Series) -> dict:
     return {"banda": banda, "valore": valore, "colore": SEMAFORO_COLORI[banda],
             "etichetta": SEMAFORO_ETICHETTE[banda], "trend": s_trend,
             "volatilita": s_vol, "momentum": s_mom}
+
+
+def serie_semaforo(prezzo: pd.Series) -> pd.Series:
+    """Punteggio composito del semaforo ([-1, +1]) **giorno per giorno**, senza dati futuri.
+
+    Stessi tre segnali di :func:`semaforo_rischio`, ma la mediana della volatilità
+    è quella **fino a quel giorno** (espandente), come l'avrebbe vista chi
+    guardava il semaforo allora. Serve al backtest.
+    """
+    p = prezzo.dropna()
+    ret = p.pct_change()
+    s_trend = ((p / p.rolling(200).mean() - 1.0) / 0.10).clip(-1, 1)
+    vol = ret.rolling(21).std() * np.sqrt(GIORNI_BORSA)
+    s_vol = (1.0 - vol / vol.expanding(252).median()).clip(-1, 1)
+    s_mom = ((p / p.shift(126) - 1.0) / 0.15).clip(-1, 1)
+    return pd.concat([s_trend, s_vol, s_mom], axis=1).mean(axis=1, skipna=False).dropna()
+
+
+def backtest_semaforo(prezzo: pd.Series) -> dict:
+    """Backtest didattico: «sempre investito» vs «fuori quando il semaforo è rosso» (1–2).
+
+    La strategia decide a fine giornata col semaforo di quel giorno e resta
+    investita il giorno dopo solo se il composito è > −0,2 (fascia ≥ 3); quando è
+    fuori rende 0% (liquidità). Senza costi di transazione né tasse, che nella
+    realtà peggiorano la strategia (in Italia ogni uscita realizza il 26% sul
+    guadagno). Restituisce ``{"valido": False}`` se lo storico è troppo corto.
+    """
+    comp = serie_semaforo(prezzo)
+    if len(comp) < GIORNI_BORSA:
+        return {"valido": False}
+    r = prezzo.dropna().pct_change().reindex(comp.index).fillna(0.0)
+    dentro = (comp > -0.2).shift(1, fill_value=True)
+    r_strat = r.where(dentro, 0.0)
+    return {
+        "valido": True,
+        "serie": pd.DataFrame({"Sempre investito": serie_cumulata(r),
+                               "Fuori quando è rosso": serie_cumulata(r_strat)}),
+        "cagr_bh": cagr(r), "cagr_strat": cagr(r_strat),
+        "dd_bh": max_drawdown(r), "dd_strat": max_drawdown(r_strat),
+        "cambi": int(dentro.astype(int).diff().abs().sum()),
+        "quota_investito": float(dentro.mean()),
+    }

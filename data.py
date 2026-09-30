@@ -20,7 +20,9 @@ occupa solo di ottenere dei prezzi "puliti".
 from __future__ import annotations
 
 import io
+import json
 import re
+import urllib.request
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -378,6 +380,35 @@ def converti_in_base(
         valuta_base=valuta_base,
         finestre=risultato.finestre,
     )
+
+
+# ---------------------------------------------------------------------------
+# Dati macro storici (Eurostat): risk-free e inflazione dell'area euro
+# ---------------------------------------------------------------------------
+
+EUROSTAT_URL = "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/{}"
+# Euribor 3 mesi (% annuo), mensile dal 1970.
+SERIE_RISK_FREE = "irt_st_m?geo=EA&int_rt=IRT_M3"
+# Indice HICP dell'area euro (ECOICOP ver.2, 2025=100), mensile dal 1996.
+SERIE_INFLAZIONE = "prc_hicp_minr?geo=EA&coicop18=TOTAL&unit=I25"
+
+
+def scarica_serie_eurostat(query: str) -> pd.Series:
+    """Scarica una serie mensile da Eurostat (formato JSON-stat).
+
+    ``query`` = dataset + filtri che isolano **una sola** serie (es.
+    ``SERIE_RISK_FREE``). Restituisce una Series indicizzata per mese, vuota se
+    il servizio non risponde (l'app ripiega allora sui valori manuali).
+    """
+    try:
+        with urllib.request.urlopen(EUROSTAT_URL.format(query), timeout=15) as risposta:
+            j = json.load(risposta)
+        tempi = j["dimension"]["time"]["category"]["index"]  # {"1996-01": 0, ...}
+        valori = j["value"]                                   # {"0": 70.97, ...}
+        serie = pd.Series({pd.Timestamp(t): valori.get(str(i)) for t, i in tempi.items()}, dtype="float64")
+        return serie.sort_index().dropna()
+    except Exception:
+        return pd.Series(dtype="float64")
 
 
 # ---------------------------------------------------------------------------

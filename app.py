@@ -48,14 +48,18 @@ st.caption(
 # Mini guida iniziale (espansa solo la prima volta).
 cm.mostra_onboarding()
 
-# Indicatore GENERALE di mercato (risk-on / risk-off), indipendente dal portafoglio.
-cm.mostra_semaforo_mercato()
+avanzato = st.session_state.get("modo_ui_val", "Base") == "Avanzato"
+
+# Indicatore GENERALE di mercato (risk-on / risk-off): strumento di market timing,
+# quindi solo in modalità «Avanzato» (in Base resta il messaggio «resta investito»).
+if avanzato:
+    cm.mostra_semaforo_mercato()
 
 cm.sidebar_parametri()
 
 # Navigazione tra le sezioni. L'Analisi tecnica (strumento avanzato) compare solo in
 # modalità «Avanzato» (punto 4: coerenza con l'investitore passivo).
 pagine = [st.Page("page_builder.py", title="Builder — Portafoglio", icon="🧱", default=True)]
-if st.session_state.get("modo_ui_val", "Base") == "Avanzato":
+if avanzato:
     pagine.append(st.Page("page_analisi.py", title="Analisi tecnica", icon="📈"))
 st.navigation(pagine).run()

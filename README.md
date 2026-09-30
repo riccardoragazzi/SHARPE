@@ -15,11 +15,11 @@ statistici e confronto con portafogli celebri. Funziona in locale e online
 
 ## Funzionalità
 
-In cima all'app, sempre visibile, c'è l'**indicatore generale di mercato
-risk-on / risk-off (1–5)**: stima statistica, indipendente dal portafoglio, se
-il contesto favorisca più gli asset rischiosi (azioni) o quelli prudenti
-(obbligazioni/liquidità), su orizzonte orientativo di ~1 anno (calcolato su un
-benchmark azionario globale).
+In modalità **Avanzato**, in cima all'app c'è l'**indicatore generale di mercato
+risk-on / risk-off (1–5)**: descrive, indipendentemente dal portafoglio, il clima
+dell'azionario globale (trend, volatilità, momentum). Il pannello include un
+**backtest** di cosa sarebbe successo usandolo per uscire dal mercato quando è
+rosso.
 
 L'app è divisa in due sezioni (menu a lato):
 
@@ -31,15 +31,18 @@ L'app è divisa in due sezioni (menu a lato):
   coerenza con l'orizzonte).
 - **Singoli asset / Portafoglio**: CAGR, volatilità, Sharpe, Sortino, max
   drawdown, cumulato; volatilità dalla **covarianza** (σₚ=√(wᵀΣw)); **heatmap di
-  correlazione** con **alert su asset troppo correlati**; **contributo al
-  rischio**; confronto sempre presente con **MSCI World** e **60/40**.
+  correlazione** (su rendimenti settimanali) con **alert su asset troppo
+  correlati**; **contributo al rischio**; confronto sempre presente con
+  **MSCI World** e **60/40** (ETF in euro: SWDA, IEAG), anche sullo Sharpe.
 - **🌍 Allocazione**: per **classe di attività** (azioni/obbligazioni/liquidità,
   auto da Yahoo), per **paese** e **settore** (auto e/o manuale / CSV).
 - **⏱️ Timing** (rolling returns): rendimento **% annuo** per ogni giorno di
   partenza, finestre 1/3/5/10/15/20/Massima; peggiore/mediana/migliore, % in perdita.
 - **💶 PAC**: backtest dei versamenti periodici vs investimento unico.
 - **🎯 Obiettivo**: versamento mensile per una cifra-obiettivo, con scenari
-  Monte Carlo (pessimista/medio/ottimista) e probabilità di successo.
+  Monte Carlo (pessimista/medio/ottimista) e probabilità di successo. I mesi
+  simulati sono estratti dallo storico del portafoglio (bootstrap), attorno a un
+  rendimento atteso modificabile; valori netti di bollo e tasse.
 - **💰 Costi e tasse**: TER e aliquota (26% / 12,5%) per asset → impatto a
   10/20 anni su valore lordo, costo del TER, tasse (incl. bollo 0,2%), netto.
 - **♻️ Ribilanciamento**: buy & hold vs ribilanciamento (annuale o a soglia).
@@ -85,8 +88,8 @@ Sharpe/
 
 - Python **3.11+**
 - I pacchetti elencati in `requirements.txt`
-  (`yfinance`, `pandas`, `numpy`, `plotly`, `streamlit`, `scipy`)
-- Connessione a Internet (i dati vengono scaricati da Yahoo Finance)
+  (`yfinance`, `pandas`, `numpy`, `plotly`, `streamlit`, `scipy`, `fpdf2`)
+- Connessione a Internet (prezzi da Yahoo Finance; tassi e inflazione da Eurostat)
 
 ## Installazione
 
@@ -136,8 +139,9 @@ Si aprirà il browser su `http://localhost:8501`.
    sidebar per forzare un nuovo download.
 5. Passa alla pagina **📈 Analisi tecnica** (menu a lato) per il dettaglio di un
    singolo asset (candele, volumi, medie mobili, RSI, disegno trendline).
-6. In cima a ogni pagina trovi l'**indicatore di mercato risk-on/off**:
-   apri il pannello per vedere il gauge 1–5 e i tre segnali che lo compongono.
+6. In modalità **Avanzato**, in cima a ogni pagina trovi l'**indicatore di
+   mercato risk-on/off**: apri il pannello per vedere il gauge 1–5, i tre
+   segnali che lo compongono e il backtest.
 
 ### Composizione paese/settore
 
@@ -176,6 +180,15 @@ SWDA.MI,settore,Tecnologia,0.24
   **non** come media pesata delle volatilità.
 - Il **contributo al rischio** di un asset = contributo marginale × peso, in %
   sul totale: evidenzia chi diversifica e chi pesa davvero sul rischio.
+- **Sharpe / Sortino** usano la media aritmetica dei rendimenti in eccesso sul
+  risk-free (definizione standard, coerente con ottimizzazione e frontiera).
+- Con valuta base EUR e l'opzione **«dati storici reali»** attiva, per il passato
+  si usano valori effettivi da **Eurostat**: Euribor 3 mesi come risk-free e
+  inflazione **HICP** per il rendimento reale. Risk-free e inflazione della barra
+  laterale restano per le proiezioni e come riserva se Eurostat non risponde.
+- **Costi e tasse**: i prezzi degli ETF sono già al netto del TER, quindi il
+  rendimento lordo è stimato come storico + TER. L'aliquota di default è 26%
+  ridotta pro-quota per i titoli di Stato (26% − 13,5% × quota governativa).
 
 ## Indicatori statistici (metodologia)
 
@@ -195,9 +208,16 @@ SWDA.MI,settore,Tecnologia,0.24
   1 anno chiuse in positivo (giudizio favorevole / neutro / sfavorevole).
 - **Timing (rolling returns)**: per ogni data di partenza, CAGR su una finestra
   fissa (1/3/5/10 anni) a partire dall'indice di ricchezza del portafoglio.
-- **Confronto portafogli famosi**: ricostruiti con ETF proxy USA (es. All
-  Weather ≈ 30% azioni, 55% obbligazioni, 7,5% oro, 7,5% materie prime); le serie
-  sono allineate sul periodo comune e (se attiva) convertite nella valuta base.
+- **Confronto portafogli famosi**: 100% MSCI World e 60/40 con ETF UCITS in euro
+  (SWDA, IEAG); All Weather, Golden Butterfly e Permanent Portfolio con ETF proxy
+  USA (es. All Weather ≈ 30% azioni, 55% obbligazioni, 7,5% oro, 7,5% materie
+  prime); le serie sono allineate sul periodo comune e (se attiva) convertite
+  nella valuta base.
+- Le metriche di portafoglio assumono **pesi costanti** (ribilanciamento
+  continuo); «compra e tieni» e ribilanciamento annuale sono nella sezione
+  ♻️ Ribilanciamento.
+- Periodo di default: **10 anni**. Timing, PAC, Obiettivo, Ribilanciamento e
+  Statistica usano invece tutto lo storico comune (indicato in ogni sezione).
 
 ## Online (Streamlit Community Cloud)
 
